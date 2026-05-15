@@ -36,3 +36,9 @@ Thumbs.db
 
 # AI Cockpit history
 .ai-cockpit/history/
+
+# AI Cockpit per-run memory suggestions (proposed, not yet accepted).
+# These are written by every run and reviewed via `ai-cockpit memory list`
+# / `memory show` / `memory accept`. They are runtime artifacts; only
+# accepted suggestions land under .ai-cockpit/memory/ and get tracked.
+.ai-cockpit/suggestions/
