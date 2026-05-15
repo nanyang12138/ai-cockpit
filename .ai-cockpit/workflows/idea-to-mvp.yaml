@@ -1,7 +1,10 @@
 name: idea-to-mvp
 description: >
-  Default exploration workflow used by AI Cockpit v0.1. Declarative metadata
-  only; the actual graph is wired in src/ai_cockpit/graph.py.
+  Default exploration workflow used by AI Cockpit. As of v0.2 step 4 this
+  YAML actually drives the run: the CLI consults `mode`, `max_loops`, and
+  `defaults.<node>.*` here when the user does not pass an explicit flag.
+  The node order MUST stay in sync with src/ai_cockpit/graph.py — the
+  loader will refuse to start otherwise.
 mode: exploration
 max_loops: 1
 nodes:
@@ -12,6 +15,9 @@ nodes:
   - reviewer
   - decision
   - summary
+defaults:
+  verifier:
+    test_commands: []
 edges:
   - from: intake
     to: planner

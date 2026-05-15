@@ -10,6 +10,52 @@ import click
 from ai_cockpit.checkpoint import new_thread_id
 from ai_cockpit.graph import run_graph
 from ai_cockpit.llm import build_llm
+from ai_cockpit.workflow import (
+    Workflow,
+    WorkflowError,
+    default_workflow_path,
+    load_workflow,
+)
+
+
+def _resolve_workflow(project_root: str, override_path: str | None) -> Workflow | None:
+    """Resolve which workflow YAML to use; missing default is OK, malformed isn't."""
+
+    if override_path is not None:
+        try:
+            return load_workflow(override_path)
+        except WorkflowError as exc:
+            raise click.UsageError(f"--workflow: {exc}") from exc
+    default_path = default_workflow_path(project_root)
+    if not default_path.is_file():
+        return None
+    try:
+        return load_workflow(default_path)
+    except WorkflowError as exc:
+        raise click.UsageError(f"workflow YAML at {default_path}: {exc}") from exc
+
+
+def _apply_workflow_defaults(
+    ctx: click.Context,
+    workflow: Workflow | None,
+    *,
+    mode: str,
+    max_loops: int,
+    test_commands: tuple[str, ...],
+) -> tuple[str, int, tuple[str, ...]]:
+    """Layer YAML-provided defaults under explicit CLI flags."""
+
+    if workflow is None:
+        return mode, max_loops, test_commands
+    default = click.core.ParameterSource.DEFAULT
+    if ctx.get_parameter_source("mode") == default:
+        mode = workflow.mode
+    if ctx.get_parameter_source("max_loops") == default:
+        max_loops = workflow.max_loops
+    yaml_cmds = workflow.verifier_test_commands()
+    if yaml_cmds:
+        test_commands = yaml_cmds + tuple(test_commands)
+    return mode, max_loops, test_commands
 
 
 @click.command(
@@ -108,7 +154,21 @@ from ai_cockpit.llm import build_llm
         "is enabled."
     ),
 )
+@click.option(
+    "--workflow",
+    "workflow_path",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help=(
+        "Override the workflow YAML path. Defaults to "
+        "<root>/.ai-cockpit/workflows/idea-to-mvp.yaml when present. "
+        "The YAML supplies defaults for --mode, --max-loops, and "
+        "--test-command; explicit CLI flags always win."
+    ),
+)
+@click.pass_context
 def main(
+    ctx: click.Context,
     idea: tuple[str, ...],
     root: str,
     max_loops: int,
@@ -120,6 +180,7 @@ def main(
     resume: bool,
     no_checkpoint: bool,
     checkpoint_db: str | None,
+    workflow_path: str | None,
 ) -> None:
     if no_checkpoint and (thread_id or resume or checkpoint_db):
         raise click.UsageError(
@@ -135,6 +196,11 @@ def main(
         raise click.UsageError("idea must be a non-empty string")
 
     project_root = str(Path(root).resolve())
+
+    workflow = _resolve_workflow(project_root, workflow_path)
+    mode, max_loops, test_commands = _apply_workflow_defaults(
+        ctx, workflow, mode=mode, max_loops=max_loops, test_commands=test_commands
+    )
 
     llm = build_llm(llm_mode)
     if llm_mode != "none" and llm is None:
