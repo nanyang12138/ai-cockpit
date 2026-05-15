@@ -69,6 +69,23 @@ starts with `claude`, the Anthropic-compatible client is used. Otherwise
 the OpenAI-compatible client is used. Override with `LLM_PROVIDER=openai`
 or `LLM_PROVIDER=anthropic`.
 
+`LLM_API_EXTRA_HEADERS` (optional, JSON object) is forwarded to the
+underlying client as `default_headers`. Use this — and only this — to
+add gateway-specific auth headers (e.g. Azure API Management's
+`Ocp-Apim-Subscription-Key`) without hardcoding any provider's header
+name. Example for an APIM-fronted Anthropic endpoint:
+
+```bash
+export LLM_API_KEY=<your-key>
+export LLM_API_BASE=https://llm-api.amd.com/Anthropic
+export LLM_MODEL_NAME=claude-opus-4-6
+export LLM_API_EXTRA_HEADERS='{"Ocp-Apim-Subscription-Key": "<your-key>"}'
+ai-cockpit "..." --llm auto
+```
+
+Malformed `LLM_API_EXTRA_HEADERS` (invalid JSON or non-object) is logged
+at WARNING and silently ignored — the run does not crash.
+
 Optional packages must be installed for the provider you select:
 
 ```bash

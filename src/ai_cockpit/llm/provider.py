@@ -14,10 +14,16 @@ Design notes:
   (case-insensitive) OR the model name starts with "claude", use the
   Anthropic-compatible client; otherwise use the OpenAI-compatible
   client. Explicit override via ``LLM_PROVIDER=anthropic|openai``.
+- ``LLM_API_EXTRA_HEADERS`` (optional JSON object) is forwarded to the
+  underlying client as ``default_headers``. This is the *only* way to
+  inject gateway-specific auth headers (e.g. Azure APIM's
+  ``Ocp-Apim-Subscription-Key`` used by some enterprise proxies)
+  without hardcoding any provider's header name in the codebase.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Protocol
@@ -46,7 +52,13 @@ def _detect_protocol(base: str | None, model: str | None) -> str:
     return "openai"
 
 
-def _build_anthropic(*, api_key: str, base_url: str | None, model: str) -> LLMProvider:
+def _build_anthropic(
+    *,
+    api_key: str,
+    base_url: str | None,
+    model: str,
+    extra_headers: dict[str, str] | None = None,
+) -> LLMProvider:
     try:
         from langchain_anthropic import ChatAnthropic
     except ImportError as exc:  # pragma: no cover - exercised only when installed
@@ -58,6 +70,8 @@ def _build_anthropic(*, api_key: str, base_url: str | None, model: str) -> LLMPr
     kwargs: dict[str, object] = {"model": model, "api_key": api_key}
     if base_url:
         kwargs["base_url"] = base_url
+    if extra_headers:
+        kwargs["default_headers"] = extra_headers
 
     client = ChatAnthropic(**kwargs)  # type: ignore[arg-type]
 
@@ -78,7 +92,13 @@ def _build_anthropic(*, api_key: str, base_url: str | None, model: str) -> LLMPr
     return _AnthropicProvider()
 
 
-def _build_openai(*, api_key: str, base_url: str | None, model: str) -> LLMProvider:
+def _build_openai(
+    *,
+    api_key: str,
+    base_url: str | None,
+    model: str,
+    extra_headers: dict[str, str] | None = None,
+) -> LLMProvider:
     try:
         from langchain_openai import ChatOpenAI
     except ImportError as exc:  # pragma: no cover - exercised only when installed
@@ -90,6 +110,8 @@ def _build_openai(*, api_key: str, base_url: str | None, model: str) -> LLMProvi
     kwargs: dict[str, object] = {"model": model, "api_key": api_key}
     if base_url:
         kwargs["base_url"] = base_url
+    if extra_headers:
+        kwargs["default_headers"] = extra_headers
 
     client = ChatOpenAI(**kwargs)  # type: ignore[arg-type]
 
@@ -103,6 +125,34 @@ def _build_openai(*, api_key: str, base_url: str | None, model: str) -> LLMProvi
             return str(content)
 
     return _OpenAIProvider()
+
+
+def _resolve_extra_headers() -> dict[str, str] | None:
+    """Parse ``LLM_API_EXTRA_HEADERS`` (JSON object) into a header dict.
+
+    Returns ``None`` when the env var is unset, empty, malformed, or not a
+    JSON object. Malformed input is logged at WARNING and silently ignored
+    rather than crashing the run, matching the rest of this module's
+    fall-back-to-stub philosophy.
+    """
+
+    raw = os.environ.get("LLM_API_EXTRA_HEADERS", "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning(
+            "LLM_API_EXTRA_HEADERS is not valid JSON (%s); ignoring extra headers", exc
+        )
+        return None
+    if not isinstance(parsed, dict):
+        log.warning(
+            "LLM_API_EXTRA_HEADERS must be a JSON object, got %s; ignoring extra headers",
+            type(parsed).__name__,
+        )
+        return None
+    return {str(k): str(v) for k, v in parsed.items()}
 
 
 def _resolve_env() -> tuple[str, str | None, str] | None:
@@ -140,6 +190,7 @@ def build_llm(mode: str) -> LLMProvider | None:
     if env is None:
         return None
     api_key, base_url, model = env
+    extra_headers = _resolve_extra_headers()
 
     if mode == "anthropic":
         protocol = "anthropic"
@@ -150,8 +201,12 @@ def build_llm(mode: str) -> LLMProvider | None:
 
     try:
         if protocol == "anthropic":
-            return _build_anthropic(api_key=api_key, base_url=base_url, model=model)
-        return _build_openai(api_key=api_key, base_url=base_url, model=model)
+            return _build_anthropic(
+                api_key=api_key, base_url=base_url, model=model, extra_headers=extra_headers
+            )
+        return _build_openai(
+            api_key=api_key, base_url=base_url, model=model, extra_headers=extra_headers
+        )
     except RuntimeError as exc:
         log.warning("LLM unavailable (%s); falling back to stub planner/reviewer", exc)
         return None
