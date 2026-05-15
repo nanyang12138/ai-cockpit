@@ -4,7 +4,7 @@
 
 ### Project Status
 
-This is a **greenfield planning repository** for "AI Cockpit" — a personal AI workflow management layer. As of now, the repository contains only planning/specification documents (`AUTOMATION_PROMPT.md`, `docs/AI_COCKPIT_SPEC_V1.md`, `docs/AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md`) and two CI workflow files. **No application source code exists yet.** The `AUTOMATION_PROMPT.md` contains instructions for building v0.1.
+This is a **greenfield planning repository** for "AI Cockpit" — a personal AI workflow management layer. As of now, the repository contains only planning/specification documents (`AUTOMATION_PROMPT.md`, `docs/AI_COCKPIT_SPEC_V1.md`, `docs/AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md`) and CI workflow files. **No application source code exists yet.** The `AUTOMATION_PROMPT.md` contains instructions for building v0.1.
 
 ### Tech Stack (Planned)
 
@@ -32,7 +32,7 @@ This is a **greenfield planning repository** for "AI Cockpit" — a personal AI 
 
 ### Key Caveats
 
-- The `github/workflows/` directory is at `github/` (not `.github/`), so the CI workflows will not trigger on GitHub unless the directory is renamed to `.github/workflows/`.
+- Workflows live under `.github/workflows/`, which is the directory GitHub Actions recognizes.
 - No `pyproject.toml` or `requirements.txt` exists yet. When the project skeleton is created, the update script should be updated to install from the project manifest.
 - LLM-dependent nodes (planner, reviewer) will need `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` environment variable set to use real LLM calls instead of stub outputs.
 - The `python3.12-venv` system package must be installed for creating virtual environments (`sudo apt-get install -y python3.12-venv`).

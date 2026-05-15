@@ -1,0 +1,51 @@
+name: validate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Validate repository
+        run: |
+          python -m pip install --upgrade pip
+
+          if [ -f pyproject.toml ]; then
+            python -m pip install -e ".[dev]" || python -m pip install -e .
+
+            if python -m pip show ruff >/dev/null 2>&1; then
+              ruff check .
+            else
+              echo "ruff is not installed; skipping lint."
+            fi
+
+            if python -m pip show mypy >/dev/null 2>&1; then
+              mypy .
+            else
+              echo "mypy is not installed; skipping type check."
+            fi
+
+            if [ -d tests ]; then
+              python -m pytest
+            else
+              echo "No tests directory yet; skipping tests."
+            fi
+          else
+            echo "No pyproject.toml yet; planning repository only."
+          fi
