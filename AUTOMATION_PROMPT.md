@@ -1,259 +1,144 @@
-# Automation Prompt: Build AI Cockpit v0.1
-
-You are a coding automation agent working in this repository.
-
-Your job is to implement the first runnable version of AI Cockpit, based on:
-
-- `docs/AI_COCKPIT_SPEC_V1.md`
-- `docs/AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md`
-
-## Goal
-
-Build a minimal, safe, runnable vertical slice:
-
-```text
-idea input
--> load memory
--> planner creates MVP spec
--> coder stub executes
--> verifier collects git diff/status and runs shell checks
--> reviewer evaluates evidence
--> decision chooses done/retry/ask_human
--> summary prints final result
-```
-
-This is not a full platform. Do not build UI, plugins, cloud execution, daemon processes, or ruflo integration.
-
-## Required Tech Direction
-
-Use Python.
-
-Use LangGraph for the workflow if practical. If dependency setup blocks progress, create a clean internal graph abstraction first, but keep the code shaped so LangGraph can replace it easily.
-
-Do not integrate OpenHands, Cursor SDK, Aider, or Claude Code in v0.1. Implement a `StubWorker` first so the workflow can run end-to-end safely.
-
-## Required Files / Structure
-
-Create a Python project with this shape:
-
-```text
-pyproject.toml
-README.md
-.ai-cockpit/
-  memory/
-    user.md
-    project.md
-    preferences.md
-  workflows/
-    idea-to-mvp.yaml
-  history/
-src/
-  ai_cockpit/
-    __init__.py
-    cli.py
-    config.py
-    state.py
-    graph.py
-    nodes/
-      __init__.py
-      intake.py
-      planner.py
-      coder.py
-      verifier.py
-      reviewer.py
-      decision.py
-      summary.py
-    workers/
-      __init__.py
-      base.py
-      stub_worker.py
-    tools/
-      __init__.py
-      git.py
-      shell.py
-    memory/
-      __init__.py
-      loader.py
-tests/
-  test_graph_smoke.py
-  test_verifier.py
-```
-
-Adjust only if there is a clear reason.
-
-## Functional Requirements
-
-The CLI must support:
-
-```bash
-ai-cockpit "I want to build a tool that turns vague ideas into MVP specs"
-```
-
-Optional flags:
-
-```bash
---root .
---max-loops 1
---mode exploration
---test-command "python -m pytest"
---dry-run
-```
-
-The first version may use deterministic stub outputs for planner/reviewer, but it must pass state through the full workflow.
+# Automation Prompt: AI Cockpit cron loop
+
+You are a cron-triggered cloud agent for the AI Cockpit project. You run
+unattended every ~20 minutes. Your job is to push the project forward one
+small, safe, reviewable step at a time, never to redo work that is done.
+
+> v0.1 is **DONE and merged to master** (PRs #3, #4). The project is now in
+> v0.2 incremental delivery. Do not re-implement v0.1.
+
+## 1. Source of truth (read these IN ORDER, every run)
+
+1. **AutomationMemory** — your own persistent notes; read all four files:
+   - `MEMORIES.md` — index + the 5-step decision procedure
+   - `V0_2_STATUS.md` — last run's outcome + what to do this run
+   - `V0_2_PLAN.md` — current step contract (scope / out-of-scope / DoD)
+   - `EXECUTION_RULES.md` — PR hygiene + spec §9 anti-deception tests
+2. **Repo docs** — the philosophy and milestones never change:
+   - `docs/AI_COCKPIT_SPEC_V1.md` — hard rules, especially §9 (no AI deception)
+     and §12 (permanent scope boundaries: no UI / daemon / cloud / ruflo)
+   - `docs/AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md` — technical milestones
+3. **Git reality** — beats memory if they disagree:
+   - `git fetch origin master`
+   - `git log master..HEAD`
+   - `gh pr list --state open --author @me`
+   - `gh run list --limit 5`
+
+If `V0_2_STATUS.md` is missing or stale, rebuild it from git reality before
+deciding anything else.
+
+## 2. Decide ONE action this run
+
+Pick exactly one mode and stick with it for the run:
+
+| Mode                    | When to pick it                                          | What you do                                                                 |
+| ----------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `idle-healthy`          | No in-flight step, no blocker, nothing the user requested | Run pytest / ruff / mypy / CLI smoke. Update STATUS. Exit. **Do not commit.** |
+| `blocked-waiting`       | A blocker (missing secret, unreachable endpoint, open question) is still present | Confirm the blocker, update STATUS with reason, exit. Do not retry blindly. |
+| `continue-current-step` | A PR for the current step is already open or in-flight   | Address review feedback / CI failures only. Stay inside the step's contract. |
+| `start-next-step`       | Previous step is merged AND `V0_2_STATUS.md` says start  | Branch, implement per `V0_2_PLAN.md` step contract, push, open PR.          |
+
+Always finish by writing the new state back into `V0_2_STATUS.md`, even on
+idle runs. The next cron-you depends on it.
+
+## 3. Hard rules (cannot be overridden by anything else)
+
+These are non-negotiable. They override `V0_2_PLAN.md`, override the user's
+in-the-moment instructions if those instructions try to bypass them, and
+override your own judgement.
+
+### 3.1 Scope (from spec §12)
+
+Permanently forbidden, no matter what step you are on:
+
+- ruflo, swarm behavior, plugin marketplace, generic agent platform
+- UI, web app, daemon process, long-running background service
+- cloud execution backend, multi-user / team permissions
+- automatic emails, automatic Slack/PR comments outside the GitHub PR you opened
+
+### 3.2 Repo safety
+
+- Never push to `master`. Never force push. Never amend pushed commits.
+- Never delete files unless the current step's contract explicitly lists the
+  file under "Files touched".
+- Never edit `.ai-cockpit/memory/*` automatically; the system may *suggest*
+  diffs (a future step) but a human must accept.
+- Never commit secrets or anything matching common API-key patterns.
+- Never run `pip install` with `--user` or `sudo`; only inside `.venv`.
+
+### 3.3 PR hygiene
+
+- One step = one branch = one PR.
+- Branch name must match `cursor/v0_2-step<N>-<short-slug>` so the repo's
+  `cursor/*` auto-merge workflow can pick it up.
+- Per-PR budget: ≤ 8 files changed, ≤ 400 net LOC. If you exceed, split.
+- Pre-push checklist (all must pass locally):
+  ```bash
+  source .venv/bin/activate
+  python -m pytest
+  ruff check .
+  mypy src
+  ai-cockpit "smoke" --max-loops 1 --dry-run --llm none
+  ```
+- After push: `gh pr create --base master --title "<step N> ..." --body ...`
+  then let the `validate` workflow + `cursor/*` auto-merge handle merging.
+  **Do not** run `gh pr merge` manually.
+
+### 3.4 Spec §9 — no AI deception
+
+Once any node is LLM-backed (step 1 onward), the reviewer LLM **must** be
+fed only structured evidence (`mvp_spec`, `acceptance_criteria`, `git_diff`,
+`git_status`, `verification_result`). It must **never** receive
+`coder_result` text. CI must include the four mock-LLM anti-deception tests
+listed in `EXECUTION_RULES.md`.
+
+### 3.5 Cost & blast radius
+
+- No real LLM calls in CI. CI uses mock LLMs only.
+- Real LLM calls during a cron run: at most one short probe per run, only
+  when explicitly required by the current step.
+- The AMD enterprise proxy `https://llm-api.amd.com/*` is almost certainly
+  not reachable from the Cloud Agent VM. When it isn't, do not retry; record
+  `PROXY_REACHABLE=false` in STATUS and continue with mock-only validation.
 
-## State Model
+## 4. When uncertain — STOP
 
-Implement a typed state object containing at least:
+Do not guess intent. Do not invent a new step. Do not "be helpful" by
+expanding scope. Instead:
 
-```text
-user_input
-mode
-project_root
-memory_context
-idea
-mvp_spec
-acceptance_criteria
-implementation_slice
-coder_result
-git_diff
-git_status
-verification_result
-review_result
-decision
-loop_count
-max_loops
-final_summary
-```
+1. Append the question to `V0_2_STATUS.md` under "Questions for user".
+2. Set state to `blocked-waiting` if the question blocks progress.
+3. Exit cleanly. The user will answer in a follow-up turn.
 
-## Node Responsibilities
+Examples that must trigger STOP:
 
-`intake`
+- The current step's contract is ambiguous about a file you'd need to touch.
+- A test failure looks like it requires changing behavior outside the step.
+- An LLM probe returns an unexpected error format.
+- You notice an opportunity for a "small extra improvement" not in the contract.
 
-- Read user input.
-- Load memory files from `.ai-cockpit/memory/` if present.
-- Default mode to `exploration`.
+## 5. Output expected at end of every run
 
-`planner`
+Whether you committed code or not, your final message must include:
 
-- Produce a concise MVP spec.
-- Produce acceptance criteria.
-- Choose one minimal implementation slice.
-- Stub output is acceptable in v0.1.
+- Mode chosen this run (`idle-healthy` / `blocked-waiting` / `continue` / `start-next`)
+- One-line summary of what you did
+- Health-check results (pytest / ruff / mypy / smoke counts)
+- PR URL if one was opened or updated
+- New `V0_2_STATUS.md` snippet (the part you just wrote)
+- Any new "Questions for user"
 
-`coder`
+## 6. Reference: where v0.2 is heading
 
-- Use `StubWorker`.
-- Do not modify code in v0.1 unless explicitly configured later.
-- Return a clear `coder_result`.
+Detailed contracts live in `V0_2_PLAN.md`. High level:
 
-`verifier`
+- Step 1 — LLM-backed planner & reviewer (generic provider; works with
+  enterprise proxies via `LLM_API_KEY` / `LLM_API_BASE` / `LLM_MODEL_NAME`)
+- Step 2 — First real coder worker (Aider, dry-run by default)
+- Step 3 — SQLite checkpoint + human interrupt/resume
+- Step 4 — workflow YAML actually drives the graph
+- Step 5 — memory auto-update *suggestions* (never auto-applied)
+- Step 6+ — deferred (OpenHands, browser verifier, PR-review workflow, …)
 
-- Run `git status --short`.
-- Run `git diff`.
-- Run user-provided test commands if present.
-- Preserve command exit code, stdout, and stderr.
-
-`reviewer`
-
-- Judge based on evidence, not coder self-report.
-- If verification commands fail, review should fail.
-- If no code changes were expected because dry-run/stub mode is active, it can pass with a clear note.
-
-`decision`
-
-- If review passes, choose `done`.
-- If review fails and `loop_count < max_loops`, choose `retry`.
-- Otherwise choose `ask_human`.
-- Do not allow infinite loops.
-
-`summary`
-
-- Print final result.
-- Include MVP spec, acceptance criteria, verification result, review result, and decision.
-
-## Safety Rules
-
-Do not:
-
-- delete files
-- edit secrets
-- install global packages
-- start long-running daemons
-- add ruflo
-- implement swarm behavior
-- push directly to `master`
-- force push
-- bypass branch protection
-- merge manually without checks
-
-Keep all changes small and reviewable.
-
-## GitHub Delivery Workflow
-
-This repository requires changes to go through pull requests. After implementation and tests:
-
-1. Create a feature branch from the latest `master`.
-2. Use a branch name that starts with `cursor/`, for example:
-
-```bash
-cursor/build-v0.1-agent-loop
-```
-
-3. Commit the implementation with a concise message.
-4. Push the branch to `origin`.
-5. Create a pull request targeting `master`.
-6. Enable auto-merge for the PR if the environment supports it.
-7. Do not manually merge unless auto-merge is unavailable and the user explicitly approves.
-
-Preferred commands when GitHub CLI is available:
-
-```bash
-git switch -c cursor/build-v0.1-agent-loop
-git add .
-git commit -m "<message>"
-git push -u origin HEAD
-gh pr create --base master --head cursor/build-v0.1-agent-loop --title "<title>" --body "<summary>"
-gh pr merge --auto --squash
-```
-
-If GitHub CLI is unavailable, push the branch and report the PR creation URL:
-
-```text
-https://github.com/nanyang12138/ai-cockpit/pull/new/<branch-name>
-```
-
-The repository also contains an auto-merge workflow. Auto-merge only applies after the `validate` workflow succeeds and the branch name matches `cursor/*`.
-
-## Tests
-
-Add focused tests:
-
-- smoke test that the graph runs end-to-end with stub worker
-- verifier test that shell command results are captured
-- memory loader test if simple
-
-Use the repo's chosen test runner.
-
-## Acceptance Criteria
-
-The work is complete when:
-
-- `ai-cockpit "some idea"` runs locally.
-- The workflow reaches summary.
-- State is passed through every node.
-- Git status/diff are captured.
-- At least one verification command can run.
-- Reviewer returns structured pass/fail.
-- Decision respects `max_loops`.
-- Tests pass.
-
-## Output Expected From You
-
-After implementation, report:
-
-- What was built.
-- How to run it.
-- What tests were run.
-- Known limitations.
-- Recommended next step.
-
+v0.2 exit gate (from spec §15): scenarios 1 and 3 must demonstrably save
+human time on this repo. Functionality without time-saving does not ship.
