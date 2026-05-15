@@ -129,6 +129,27 @@ when needed. Aider runs with `--yes-always --no-stream
 --no-auto-commits` so it stays non-interactive and leaves its diff in
 the working tree for the verifier to pick up.
 
+**APIM gateways (v0.3 step 2 follow-up):** when both
+`LLM_API_EXTRA_HEADERS` and `LLM_MODEL_NAME` are set, AiderWorker
+auto-generates a temporary aider `--model-settings-file` entry with
+`extra_params.extra_headers` so the same APIM subscription header
+that bridges the planner/reviewer also bridges aider's LiteLLM
+calls. No provider's header name is hardcoded; the same env that
+makes `--llm auto` work makes `--worker aider --apply` work, with
+no additional configuration:
+
+```bash
+export LLM_API_KEY=<your key>
+export LLM_API_BASE=https://llm-api.amd.com/Anthropic
+export LLM_MODEL_NAME=claude-opus-4-6
+export LLM_API_EXTRA_HEADERS='{"Ocp-Apim-Subscription-Key": "<your key>"}'
+# Aider also needs ANTHROPIC_API_KEY / ANTHROPIC_API_BASE to discover
+# the same endpoint; map them from LLM_*:
+export ANTHROPIC_API_KEY="$LLM_API_KEY"
+export ANTHROPIC_API_BASE="$LLM_API_BASE"
+ai-cockpit "fix the failing test" --worker aider --apply --llm auto
+```
+
 > **Note on dependency conflicts:** `pip install aider-chat` may
 > downgrade the `openai` package to a version that's incompatible
 > with `langchain-openai`. This is harmless if you use `--llm auto`

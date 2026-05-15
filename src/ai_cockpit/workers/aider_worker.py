@@ -20,19 +20,103 @@ Safety contract (per V0_2_PLAN.md Step 2):
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import subprocess
+import tempfile
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+import yaml
+
 from ai_cockpit.workers.base import WorkerRequest, WorkerResult
+
+log = logging.getLogger(__name__)
 
 DEFAULT_AIDER_ARGS: tuple[str, ...] = (
     "--yes-always",
     "--no-stream",
     "--no-auto-commits",
 )
+
+
+def _detect_protocol(base: str | None, model: str | None) -> str:
+    """Same detection used by ``ai_cockpit.llm.provider`` — pick Anthropic
+    vs OpenAI from the env so the aider model string carries the right
+    LiteLLM provider prefix."""
+
+    explicit = os.environ.get("LLM_PROVIDER", "").strip().lower()
+    if explicit in {"anthropic", "openai"}:
+        return explicit
+    if base and "anthropic" in base.lower():
+        return "anthropic"
+    if model and model.lower().startswith("claude"):
+        return "anthropic"
+    return "openai"
+
+
+def _aider_model_string(protocol: str, model: str) -> str:
+    if "/" in model:
+        return model
+    return f"{protocol}/{model}"
+
+
+def _parse_extra_headers() -> dict[str, str] | None:
+    """Read ``LLM_API_EXTRA_HEADERS`` (JSON object) into a dict, or None.
+
+    Matches the parser in ``ai_cockpit.llm.provider`` so the AMD APIM
+    setup works identically across planner / reviewer / aider worker.
+    """
+
+    raw = os.environ.get("LLM_API_EXTRA_HEADERS", "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        log.warning(
+            "LLM_API_EXTRA_HEADERS is not valid JSON (%s); aider will not "
+            "receive any custom headers",
+            exc,
+        )
+        return None
+    if not isinstance(parsed, dict):
+        log.warning(
+            "LLM_API_EXTRA_HEADERS must be a JSON object, got %s; "
+            "aider will not receive any custom headers",
+            type(parsed).__name__,
+        )
+        return None
+    return {str(k): str(v) for k, v in parsed.items()}
+
+
+def _write_model_settings_file(model_name: str, extra_headers: dict[str, str]) -> str:
+    """Materialize a one-entry aider model-settings YAML and return its path.
+
+    Aider's ``--model-settings-file`` consumes a list of ModelSettings
+    entries. ``extra_params`` is splatted into the underlying LiteLLM
+    completion call, so ``extra_params.extra_headers`` is the documented
+    path to inject HTTP headers like Azure APIM's
+    ``Ocp-Apim-Subscription-Key`` (confirmed against aider 0.86's
+    ``aider.models.ModelSettings``).
+    """
+
+    payload = [
+        {
+            "name": model_name,
+            "extra_params": {"extra_headers": extra_headers},
+        }
+    ]
+    tmp = tempfile.NamedTemporaryFile(
+        mode="w", suffix=".aider-settings.yml", delete=False
+    )
+    try:
+        yaml.safe_dump(payload, tmp, sort_keys=False)
+    finally:
+        tmp.close()
+    return tmp.name
 
 
 def _default_runner(
@@ -71,12 +155,52 @@ class AiderWorker:
             f"{criteria_block}"
         )
 
-    def _build_command(self, message: str) -> list[str]:
-        return [self.executable, *DEFAULT_AIDER_ARGS, *self.extra_args, "--message", message]
+    def _build_command(
+        self,
+        message: str,
+        *,
+        model: str | None = None,
+        model_settings_file: str | None = None,
+    ) -> list[str]:
+        cmd: list[str] = [self.executable, *DEFAULT_AIDER_ARGS]
+        if model:
+            cmd.extend(["--model", model])
+        if model_settings_file:
+            cmd.extend(["--model-settings-file", model_settings_file])
+        cmd.extend(self.extra_args)
+        cmd.extend(["--message", message])
+        return cmd
+
+    def _resolve_apim_bridge(self) -> tuple[str | None, str | None]:
+        """If APIM headers are configured, return (model_string, settings_path).
+
+        Otherwise return (None, None) and the worker falls back to whatever
+        aider auto-detects from its own env vars. Either branch keeps the
+        worker generic — nothing about the AMD endpoint is hardcoded.
+        """
+
+        headers = _parse_extra_headers()
+        model_name = os.environ.get("LLM_MODEL_NAME", "").strip()
+        if not headers or not model_name:
+            return None, None
+        protocol = _detect_protocol(os.environ.get("LLM_API_BASE"), model_name)
+        model_string = _aider_model_string(protocol, model_name)
+        settings_path = _write_model_settings_file(model_string, headers)
+        return model_string, settings_path
 
     def run(self, request: WorkerRequest) -> WorkerResult:
         message = self._build_message(request)
-        command = self._build_command(message)
+        model, settings_path = self._resolve_apim_bridge()
+        command = self._build_command(
+            message, model=model, model_settings_file=settings_path
+        )
+
+        def _cleanup() -> None:
+            if settings_path:
+                try:
+                    os.unlink(settings_path)
+                except OSError:
+                    pass
 
         if request.dry_run:
             preview = (
@@ -85,6 +209,7 @@ class AiderWorker:
                 "message:\n"
                 f"{message}"
             )
+            _cleanup()
             return WorkerResult(
                 summary=preview,
                 changed_files=[],
@@ -100,6 +225,7 @@ class AiderWorker:
                 timeout=self.timeout_seconds,
             )
         except FileNotFoundError as exc:
+            _cleanup()
             return WorkerResult(
                 summary=(
                     "AiderWorker error: aider executable not found "
@@ -110,6 +236,7 @@ class AiderWorker:
                 notes=f"FileNotFoundError: {exc}",
             )
         except subprocess.TimeoutExpired as exc:
+            _cleanup()
             raw_partial = exc.stdout
             if isinstance(raw_partial, bytes):
                 partial = raw_partial.decode("utf-8", errors="replace")
@@ -125,6 +252,7 @@ class AiderWorker:
                 notes="TimeoutExpired: aider was terminated by the worker.",
             )
 
+        _cleanup()
         stdout = (completed.stdout or "").strip()
         stderr = (completed.stderr or "").strip()
         summary = (
