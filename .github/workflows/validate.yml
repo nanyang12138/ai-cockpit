@@ -4,7 +4,14 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
   push:
-    branches: [master]
+    branches:
+      - master
+      # Also run on direct pushes to `cursor/**` so cron-pushed branches
+      # get validated immediately (before a PR exists). Combined with
+      # `cursor-pr-automation.yml`'s `open-pr` job, this lets the
+      # cron-push -> open-PR -> validate -> auto-merge chain complete
+      # without any human click.
+      - 'cursor/**'
 
 permissions:
   contents: read
