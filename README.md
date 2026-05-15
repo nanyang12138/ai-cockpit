@@ -29,8 +29,22 @@ that performs no edits.
 
 ```bash
 python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+source .venv/bin/activate          # tcsh / csh: source .venv/bin/activate.csh
+pip install -e ".[dev]"             # NOT plain `pip install -e .` — the
+                                    # dev extras carry pytest / ruff / mypy
+                                    # which the verifier and pre-push
+                                    # checklist rely on.
+```
+
+> **csh / tcsh users:** after every `pip install ...` you also need
+> `rehash` so the shell picks up newly-added executables (e.g.
+> `ai-cockpit`, `aider`, `pytest`). bash users can ignore this.
+
+To also enable real-LLM `--llm auto` and the AiderWorker:
+
+```bash
+pip install -e ".[llm]"             # langchain-anthropic + langchain-openai
+pip install aider-chat              # only if you want --worker aider
 ```
 
 ## Run
