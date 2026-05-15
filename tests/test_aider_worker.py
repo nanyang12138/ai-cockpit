@@ -94,6 +94,7 @@ def test_real_run_builds_expected_command(monkeypatch: pytest.MonkeyPatch) -> No
     assert "--yes-always" in cmd
     assert "--no-stream" in cmd
     assert "--no-auto-commits" in cmd
+    assert "--no-gitignore" in cmd
     assert "--message" in cmd
     message_index = cmd.index("--message") + 1
     message = cmd[message_index]
@@ -291,6 +292,23 @@ def test_settings_file_is_cleaned_up_after_run(
     settings_path = cmd[cmd.index("--model-settings-file") + 1]
     # _cleanup runs at the end of a successful invocation.
     assert not _os.path.exists(settings_path)
+
+
+def test_default_command_passes_no_gitignore() -> None:
+    """Regression test: aider must never touch the user's .gitignore.
+
+    Real-LLM run on 2026-05-15 (AMD APIM) showed aider adding '.aider*'
+    entries to .gitignore on every invocation, which broke the planner-
+    written 'no other files are modified' criterion and showed up as
+    noise in the reviewer's git_status evidence.
+    """
+
+    runner = _FakeRunner()
+    worker = AiderWorker(subprocess_runner=runner)
+    worker.run(_req())
+
+    cmd = runner.calls[0]["cmd"]
+    assert "--no-gitignore" in cmd
 
 
 def test_select_worker_rejects_unknown_name() -> None:
