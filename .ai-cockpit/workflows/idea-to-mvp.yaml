@@ -1,0 +1,34 @@
+name: idea-to-mvp
+description: >
+  Default exploration workflow used by AI Cockpit v0.1. Declarative metadata
+  only; the actual graph is wired in src/ai_cockpit/graph.py.
+mode: exploration
+max_loops: 1
+nodes:
+  - intake
+  - planner
+  - coder
+  - verifier
+  - reviewer
+  - decision
+  - summary
+edges:
+  - from: intake
+    to: planner
+  - from: planner
+    to: coder
+  - from: coder
+    to: verifier
+  - from: verifier
+    to: reviewer
+  - from: reviewer
+    to: decision
+  - from: decision
+    to: coder
+    when: retry
+  - from: decision
+    to: summary
+    when: done
+  - from: decision
+    to: summary
+    when: ask_human
