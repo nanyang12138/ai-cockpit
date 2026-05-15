@@ -1,0 +1,62 @@
+name: bug-fix
+description: >
+  Workflow for the spec section 15 scenario 1: take a small failing
+  test or bug, drive an iterative fix-verify loop until the verifier
+  reports tests pass, and let the reviewer judge.
+
+  v0.3 micro-step #2: this is the second workflow YAML shipped with
+  ai-cockpit. Pass it explicitly with `--workflow .ai-cockpit/workflows/
+  bug-fix.yaml` (or copy it to your repo and reference). The graph
+  topology MUST match `src/ai_cockpit/graph.py` — the loader refuses
+  to start otherwise.
+
+  Key differences from `idea-to-mvp.yaml`:
+    - mode: task (focused on a concrete failing test, not exploration)
+    - max_loops: 3 (let the worker iterate to converge)
+    - verifier.test_commands: ships a non-empty default so the
+      reviewer's "lint/tests passed" evidence is collected even when
+      the user forgets `--test-command`. Observed during the §15.1
+      real-LLM demo on 2026-05-15: the reviewer correctly flagged
+      unverified test/lint criteria precisely because the user did
+      not pass --test-command. This workflow makes that case the
+      default rather than the exception.
+
+  Hard rule §9 (no AI deception) is preserved: the verifier still
+  runs deterministic shell commands and the reviewer still sees only
+  structured evidence. The planner cannot influence WHICH commands
+  run; that mapping is fixed here in YAML and the user can override.
+mode: task
+max_loops: 3
+nodes:
+  - intake
+  - planner
+  - coder
+  - verifier
+  - reviewer
+  - decision
+  - summary
+defaults:
+  verifier:
+    test_commands:
+      - python -m pytest -q
+      - ruff check .
+edges:
+  - from: intake
+    to: planner
+  - from: planner
+    to: coder
+  - from: coder
+    to: verifier
+  - from: verifier
+    to: reviewer
+  - from: reviewer
+    to: decision
+  - from: decision
+    to: coder
+    when: retry
+  - from: decision
+    to: summary
+    when: done
+  - from: decision
+    to: summary
+    when: ask_human

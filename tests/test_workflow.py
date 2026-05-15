@@ -36,6 +36,26 @@ def test_repo_yaml_matches_canonical_order() -> None:
     assert (w.mode, w.max_loops) == ("exploration", 1)
 
 
+def test_bug_fix_workflow_is_valid_and_seeds_test_commands() -> None:
+    """v0.3 micro-step #2: bug-fix.yaml must parse, match the graph
+    topology, and ship a non-empty default verifier.test_commands so the
+    reviewer's lint/tests evidence is collected by default."""
+
+    repo_root = Path(__file__).resolve().parents[1]
+    bug_fix = repo_root / ".ai-cockpit" / "workflows" / "bug-fix.yaml"
+    assert bug_fix.is_file(), "bug-fix.yaml must ship in the repo"
+
+    w = load_workflow(bug_fix)
+    assert w.node_order == CANONICAL_NODE_ORDER
+    assert w.mode == "task"
+    assert w.max_loops >= 2, "bug-fix mode should allow worker iteration"
+    cmds = w.verifier_test_commands()
+    assert cmds, "bug-fix workflow must seed test commands"
+    joined = " | ".join(cmds)
+    assert "pytest" in joined
+    assert "ruff" in joined
+
+
 def test_parse_workflow_valid_and_verifier_test_commands() -> None:
     w = parse_workflow(_base(mode="task", max_loops=2))
     assert (w.mode, w.max_loops, w.defaults, w.verifier_test_commands()) == (

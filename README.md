@@ -159,6 +159,27 @@ ai-cockpit "fix the failing test" --worker aider --apply --llm auto
 > never loaded). If you need both, install aider into a separate
 > virtualenv.
 
+### Workflow YAMLs (v0.2 step 4 + v0.3 micro-step #2)
+
+`ai-cockpit` ships two workflow YAMLs under `.ai-cockpit/workflows/`:
+
+| File | Mode | Purpose |
+| --- | --- | --- |
+| `idea-to-mvp.yaml` | exploration | Default. Take a vague idea, produce a spec/slice. No automatic test commands. |
+| `bug-fix.yaml` | task | Target a concrete failing test or bug. `max_loops: 3` to let the worker iterate; `defaults.verifier.test_commands` already includes `python -m pytest -q` and `ruff check .` so the reviewer has lint/test evidence even when you forget `--test-command`. |
+
+Select with `--workflow`:
+
+```bash
+ai-cockpit "fix the failing test in tests/test_calc.py" \
+    --workflow .ai-cockpit/workflows/bug-fix.yaml \
+    --worker aider --apply --llm auto
+```
+
+Explicit CLI flags (`--mode`, `--max-loops`, `--test-command`) always
+win over YAML defaults. YAML node order MUST match
+`src/ai_cockpit/graph.py`; the loader refuses to start otherwise.
+
 ### Checkpoint & resume (v0.2 step 3, on by default)
 
 Every run is persisted via LangGraph's `SqliteSaver` to
