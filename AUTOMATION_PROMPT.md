@@ -22,7 +22,7 @@ idea input
 -> summary prints final result
 ```
 
-This is not a full platform. Do not build UI, plugins, cloud execution, PR automation, daemon processes, or ruflo integration.
+This is not a full platform. Do not build UI, plugins, cloud execution, daemon processes, or ruflo integration.
 
 ## Required Tech Direction
 
@@ -175,17 +175,54 @@ final_summary
 
 Do not:
 
-- commit
-- push
-- create PRs
 - delete files
 - edit secrets
 - install global packages
 - start long-running daemons
 - add ruflo
 - implement swarm behavior
+- push directly to `master`
+- force push
+- bypass branch protection
+- merge manually without checks
 
 Keep all changes small and reviewable.
+
+## GitHub Delivery Workflow
+
+This repository requires changes to go through pull requests. After implementation and tests:
+
+1. Create a feature branch from the latest `master`.
+2. Use a branch name that starts with `cursor/`, for example:
+
+```bash
+cursor/build-v0.1-agent-loop
+```
+
+3. Commit the implementation with a concise message.
+4. Push the branch to `origin`.
+5. Create a pull request targeting `master`.
+6. Enable auto-merge for the PR if the environment supports it.
+7. Do not manually merge unless auto-merge is unavailable and the user explicitly approves.
+
+Preferred commands when GitHub CLI is available:
+
+```bash
+git switch -c cursor/build-v0.1-agent-loop
+git add .
+git commit -m "<message>"
+git push -u origin HEAD
+gh pr create --base master --head cursor/build-v0.1-agent-loop --title "<title>" --body "<summary>"
+gh pr merge --auto --squash
+```
+
+If GitHub CLI is unavailable, push the branch and report the PR creation URL:
+
+```text
+https://github.com/nanyang12138/ai-cockpit/pull/new/<branch-name>
+```
+
+The repository also contains an auto-merge workflow. Auto-merge only applies after the `validate` workflow succeeds and the branch name matches `cursor/*`.
 
 ## Tests
 
