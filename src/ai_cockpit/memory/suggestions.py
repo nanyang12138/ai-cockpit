@@ -87,13 +87,36 @@ def _slugify(text: str, max_len: int = 24) -> str:
 def build_suggestion_from_state(
     state: TaskState, *, when: datetime | None = None,
 ) -> Suggestion | None:
-    """Synthesize a project-memory suggestion from a finished run, or None."""
+    """Synthesize a project-memory suggestion from a finished run, or None.
+
+    v0.3 micro-step: skip writes that carry no information. Concretely:
+    when ``decision == 'ask_human'`` AND the verifier captured an empty
+    ``git_diff``, the run produced no actionable knowledge — it's a
+    coder no-op the reviewer correctly rejected, and recording it in
+    project.md would only add noise on future ``ai-cockpit memory list``
+    output. Successful runs (``decision == 'done'``) are always kept,
+    and ``ask_human`` runs that DID produce a diff (the reviewer
+    rejected a real change) are kept because that escalation context
+    is worth remembering. Observed during the §15.1 real-LLM
+    validation on 2026-05-15: the stub-worker / coder-noop runs were
+    pure noise; the aider-made-real-changes-but-lint-unverified run
+    is the kind we want to keep.
+    """
 
     decision = state.get("decision")
     idea = (state.get("idea") or state.get("user_input") or "").strip()
     spec = (state.get("mvp_spec") or "").strip()
     if not idea or not spec or decision not in ("done", "ask_human"):
         return None
+
+    if decision == "ask_human":
+        verification: object = state.get("verification_result") or {}
+        if isinstance(verification, dict):
+            diff = str(verification.get("git_diff") or "").strip()
+        else:
+            diff = ""
+        if not diff:
+            return None
 
     when = when or datetime.now(UTC)
     sid = when.strftime("%Y%m%dT%H%M%S") + f"-{decision}-{_slugify(idea)}"
