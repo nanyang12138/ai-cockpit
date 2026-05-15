@@ -1,0 +1,90 @@
+name: auto-merge-cursor-pr
+
+on:
+  workflow_run:
+    workflows: ["validate"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-merge:
+    if: >
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve pull request from workflow_run
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          PR_NUMBER=$(jq -r '.workflow_run.pull_requests[0].number // empty' "$GITHUB_EVENT_PATH")
+
+          if [ -z "$PR_NUMBER" ]; then
+            HEAD_BRANCH=$(jq -r '.workflow_run.head_branch' "$GITHUB_EVENT_PATH")
+            HEAD_OWNER=$(jq -r '.workflow_run.head_repository.owner.login // .repository.owner.login' "$GITHUB_EVENT_PATH")
+            echo "workflow_run payload had no PR number; falling back to head lookup: ${HEAD_OWNER}:${HEAD_BRANCH}"
+
+            PR_NUMBER=$(gh api "repos/${REPO}/pulls" \
+              -f state=open \
+              -f head="${HEAD_OWNER}:${HEAD_BRANCH}" \
+              --jq '.[0].number // empty')
+          fi
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "Could not resolve PR for workflow_run."
+            echo "workflow_run event:"
+            jq '.workflow_run | {id, event, conclusion, head_branch, head_sha, pull_requests}' "$GITHUB_EVENT_PATH"
+            exit 1
+          fi
+
+          PR_JSON=$(gh pr view "$PR_NUMBER" \
+            --repo "$REPO" \
+            --json number,isDraft,author,url,headRefName,mergeStateStatus)
+
+          echo "$PR_JSON"
+
+          AUTHOR=$(echo "$PR_JSON" | jq -r '.author.login')
+          HEAD_REF=$(echo "$PR_JSON" | jq -r '.headRefName')
+
+          if [ "$AUTHOR" != "cursor[bot]" ] && [ "$AUTHOR" != "app/cursor" ] && [ "$AUTHOR" != "nanyang12138" ]; then
+            echo "Refusing to auto-merge PR authored by ${AUTHOR}"
+            exit 1
+          fi
+
+          case "$HEAD_REF" in
+            cursor/*) ;;
+            *)
+              echo "Refusing to auto-merge non-Cursor branch: ${HEAD_REF}"
+              exit 1
+              ;;
+          esac
+
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "is_draft=$(echo "$PR_JSON" | jq -r '.isDraft')" >> "$GITHUB_OUTPUT"
+          echo "url=$(echo "$PR_JSON" | jq -r '.url')" >> "$GITHUB_OUTPUT"
+
+      - name: Mark draft PR ready
+        if: steps.pr.outputs.is_draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          gh pr ready "$PR_NUMBER" --repo "$REPO"
+
+      - name: Enable squash auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          gh pr merge "$PR_NUMBER" \
+            --repo "$REPO" \
+            --auto \
+            --squash
