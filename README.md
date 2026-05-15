@@ -49,6 +49,9 @@ Optional flags:
 | `--test-command CMD` | none | Shell command to run as a verification check. May be repeated. |
 | `--dry-run` | off | Skip running the test command(s); still collect git status/diff. |
 | `--llm MODE` | `none` | `none` keeps stub planner/reviewer (default). `auto` picks Anthropic vs OpenAI from env. `anthropic` / `openai` force a provider. |
+| `--thread-id ID` | none | Persist this run under `ID` (enables SQLite checkpointing). |
+| `--resume ID` | none | Resume a previously-saved run from its last checkpoint. |
+| `--checkpoint-db PATH` | `<root>/.ai-cockpit/history/checkpoints.sqlite` | Override the checkpoint DB location. |
 
 ### LLM configuration (v0.2 step 1, opt-in)
 
@@ -76,6 +79,22 @@ pip install -e ".[openai]"
 If credentials or the optional package are missing, the CLI prints a
 warning and falls back to the v0.1 stub planner/reviewer — runs never
 crash.
+
+### Checkpoint & resume (v0.2 step 3, opt-in)
+
+When `--thread-id` is supplied, the run is persisted via LangGraph's
+`SqliteSaver` to `<root>/.ai-cockpit/history/checkpoints.sqlite` (or a
+custom `--checkpoint-db PATH`). If the process exits between nodes, you
+can continue the same run later:
+
+```bash
+ai-cockpit "build a tiny CLI" --thread-id my-run-001
+# ...later, after a kill or another session...
+ai-cockpit --resume my-run-001
+```
+
+Without `--thread-id` / `--resume`, behavior is identical to v0.1 —
+nothing is written to disk.
 
 Example:
 
@@ -114,13 +133,14 @@ source .venv/bin/activate
 python -m pytest
 ```
 
-## Known Limitations (v0.1, partially addressed in v0.2 step 1)
+## Known Limitations (v0.1, partially addressed in v0.2 step 1 + step 3)
 
 - Planner and reviewer default to deterministic stubs; pass `--llm auto`
   with credentials to enable real LLM calls (v0.2 step 1).
 - Coder is still a `StubWorker` that never modifies files.
 - No human-in-the-loop interrupts; `ask_human` is reported but not interactive.
-- No checkpoint persistence beyond the in-memory `TaskState`.
+- Checkpoint/resume now persists graph state to SQLite (v0.2 step 3),
+  but resumption is currently driven by the CLI only — no UI.
 - No real worker integration (Aider, Cursor SDK, OpenHands intentionally excluded).
 
 ## Recommended Next Step

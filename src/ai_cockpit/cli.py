@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from ai_cockpit.checkpoint import new_thread_id
 from ai_cockpit.graph import run_graph
 from ai_cockpit.llm import build_llm
 
@@ -15,7 +16,7 @@ from ai_cockpit.llm import build_llm
     name="ai-cockpit",
     help="Run the AI Cockpit v0.1 idea-to-MVP execution loop on an idea.",
 )
-@click.argument("idea", nargs=-1, required=True)
+@click.argument("idea", nargs=-1, required=False)
 @click.option(
     "--root",
     "root",
@@ -65,6 +66,39 @@ from ai_cockpit.llm import build_llm
         "then OPENAI_API_KEY). 'none' (default) keeps stub behavior."
     ),
 )
+@click.option(
+    "--thread-id",
+    "thread_id",
+    default=None,
+    type=str,
+    help=(
+        "Persist this run under the given thread id (enables SQLite "
+        "checkpointing). Use the same id later with --resume to continue."
+    ),
+)
+@click.option(
+    "--resume",
+    "resume_thread",
+    default=None,
+    type=str,
+    metavar="THREAD_ID",
+    help=(
+        "Resume the run identified by THREAD_ID from the last saved "
+        "checkpoint. Mutually exclusive with --thread-id; idea argument "
+        "is ignored when resuming."
+    ),
+)
+@click.option(
+    "--checkpoint-db",
+    "checkpoint_db",
+    default=None,
+    type=click.Path(dir_okay=False),
+    help=(
+        "Override the checkpoint database path. Defaults to "
+        "<root>/.ai-cockpit/history/checkpoints.sqlite when checkpointing "
+        "is enabled."
+    ),
+)
 def main(
     idea: tuple[str, ...],
     root: str,
@@ -73,10 +107,23 @@ def main(
     test_commands: tuple[str, ...],
     dry_run: bool,
     llm_mode: str,
+    thread_id: str | None,
+    resume_thread: str | None,
+    checkpoint_db: str | None,
 ) -> None:
-    user_input = " ".join(idea).strip()
-    if not user_input:
-        raise click.UsageError("idea must be a non-empty string")
+    if thread_id and resume_thread:
+        raise click.UsageError("--thread-id and --resume are mutually exclusive")
+
+    resume = resume_thread is not None
+    effective_thread_id = resume_thread if resume else thread_id
+
+    if resume:
+        # idea argument is optional / ignored when resuming
+        user_input = " ".join(idea).strip() if idea else ""
+    else:
+        user_input = " ".join(idea).strip() if idea else ""
+        if not user_input:
+            raise click.UsageError("idea must be a non-empty string")
 
     project_root = str(Path(root).resolve())
 
@@ -91,6 +138,17 @@ def main(
     elif llm is not None:
         click.echo(f"info: LLM enabled ({llm.name})", err=True)
 
+    # If the user enabled checkpointing without supplying an id, mint one
+    # so they can resume later.
+    if not resume and effective_thread_id is None and checkpoint_db is not None:
+        effective_thread_id = new_thread_id()
+        click.echo(f"info: checkpoint thread id: {effective_thread_id}", err=True)
+
+    if effective_thread_id is not None and not resume:
+        click.echo(f"info: persisting run as thread {effective_thread_id}", err=True)
+    elif resume:
+        click.echo(f"info: resuming thread {effective_thread_id}", err=True)
+
     run_graph(
         user_input=user_input,
         project_root=project_root,
@@ -99,6 +157,9 @@ def main(
         test_commands=list(test_commands),
         dry_run=dry_run,
         llm=llm,
+        checkpoint_db=checkpoint_db,
+        thread_id=effective_thread_id,
+        resume=resume,
     )
 
 
