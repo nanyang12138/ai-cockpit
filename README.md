@@ -49,8 +49,9 @@ Optional flags:
 | `--test-command CMD` | none | Shell command to run as a verification check. May be repeated. |
 | `--dry-run` | off | Skip running the test command(s); still collect git status/diff. |
 | `--llm MODE` | `none` | `none` keeps stub planner/reviewer (default). `auto` picks Anthropic vs OpenAI from env. `anthropic` / `openai` force a provider. |
-| `--thread-id ID` | none | Persist this run under `ID` (enables SQLite checkpointing). |
-| `--resume ID` | none | Resume a previously-saved run from its last checkpoint. |
+| `--thread-id ID` | auto-minted | Explicit thread id under which this run is persisted. When omitted, a fresh id is generated and printed to stderr. |
+| `--resume` | off | Boolean flag. Resume the run identified by `--thread-id` from its last checkpoint. Requires `--thread-id`; the idea argument is ignored. |
+| `--no-checkpoint` | off | Disable SQLite checkpointing for this run (no DB writes). Mutually exclusive with `--thread-id` / `--resume` / `--checkpoint-db`. |
 | `--checkpoint-db PATH` | `<root>/.ai-cockpit/history/checkpoints.sqlite` | Override the checkpoint DB location. |
 
 ### LLM configuration (v0.2 step 1, opt-in)
@@ -80,21 +81,30 @@ If credentials or the optional package are missing, the CLI prints a
 warning and falls back to the v0.1 stub planner/reviewer — runs never
 crash.
 
-### Checkpoint & resume (v0.2 step 3, opt-in)
+### Checkpoint & resume (v0.2 step 3, on by default)
 
-When `--thread-id` is supplied, the run is persisted via LangGraph's
-`SqliteSaver` to `<root>/.ai-cockpit/history/checkpoints.sqlite` (or a
-custom `--checkpoint-db PATH`). If the process exits between nodes, you
-can continue the same run later:
+Every run is persisted via LangGraph's `SqliteSaver` to
+`<root>/.ai-cockpit/history/checkpoints.sqlite` (or a custom
+`--checkpoint-db PATH`). When you don't pass `--thread-id`, a fresh id
+is auto-generated and printed to stderr — record it if you might want
+to resume later.
+
+If the process exits between nodes, you can continue the same run:
 
 ```bash
 ai-cockpit "build a tiny CLI" --thread-id my-run-001
 # ...later, after a kill or another session...
-ai-cockpit --resume my-run-001
+ai-cockpit --resume --thread-id my-run-001
 ```
 
-Without `--thread-id` / `--resume`, behavior is identical to v0.1 —
-nothing is written to disk.
+To opt out entirely (e.g. for ephemeral CI checks or smoke tests):
+
+```bash
+ai-cockpit "smoke" --no-checkpoint
+```
+
+`--no-checkpoint` cannot be combined with `--thread-id`, `--resume`,
+or `--checkpoint-db`.
 
 Example:
 
