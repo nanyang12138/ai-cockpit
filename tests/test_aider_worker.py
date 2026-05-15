@@ -194,6 +194,105 @@ def test_build_graph_with_aider_worker_routes_coder(
     assert "no subprocess was spawned" in final["coder_result"].lower() or True
 
 
+# APIM bridge: LLM_API_EXTRA_HEADERS + LLM_MODEL_NAME -> aider model-settings
+
+
+def test_apim_headers_generate_model_settings_file(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import yaml as _yaml
+
+    monkeypatch.setenv("LLM_API_KEY", "k")
+    monkeypatch.setenv("LLM_API_BASE", "https://llm-api.amd.com/Anthropic")
+    monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
+    monkeypatch.setenv(
+        "LLM_API_EXTRA_HEADERS", '{"Ocp-Apim-Subscription-Key": "abc"}'
+    )
+
+    runner = _FakeRunner()
+    worker = AiderWorker(subprocess_runner=runner)
+    worker.run(_req(project_root=str(tmp_path)))
+
+    cmd = runner.calls[0]["cmd"]
+    assert "--model" in cmd
+    assert cmd[cmd.index("--model") + 1] == "anthropic/claude-opus-4-6"
+    assert "--model-settings-file" in cmd
+    settings_path = cmd[cmd.index("--model-settings-file") + 1]
+
+    # Tempfile is cleaned up after the run; capture it before _cleanup runs
+    # by reading from the captured call (we re-call worker with dry_run=True
+    # to keep a fresh settings file around for inspection).
+    monkeypatch.setenv(
+        "LLM_API_EXTRA_HEADERS", '{"Ocp-Apim-Subscription-Key": "abc"}'
+    )
+    runner2 = _FakeRunner()
+    worker2 = AiderWorker(subprocess_runner=runner2)
+    worker2.run(_req(dry_run=True, project_root=str(tmp_path)))
+    # After dry_run the file is also cleaned up (see _cleanup), so verify the
+    # behavior structurally instead: confirm the settings_path was a real
+    # tempfile path under /tmp.
+    assert "/tmp" in settings_path or "/var/folders" in settings_path
+    assert settings_path.endswith(".aider-settings.yml")
+
+    # Verify the YAML content matches what we'd write by directly calling
+    # the helper, which is what the worker uses internally:
+    from ai_cockpit.workers.aider_worker import _write_model_settings_file
+
+    path = _write_model_settings_file(
+        "anthropic/claude-opus-4-6", {"Ocp-Apim-Subscription-Key": "abc"}
+    )
+    try:
+        with open(path) as f:
+            payload = _yaml.safe_load(f)
+        assert payload == [
+            {
+                "name": "anthropic/claude-opus-4-6",
+                "extra_params": {
+                    "extra_headers": {"Ocp-Apim-Subscription-Key": "abc"}
+                },
+            }
+        ]
+    finally:
+        import os as _os
+        _os.unlink(path)
+
+
+def test_no_extra_headers_means_no_model_settings_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.delenv("LLM_API_EXTRA_HEADERS", raising=False)
+    monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
+
+    runner = _FakeRunner()
+    worker = AiderWorker(subprocess_runner=runner)
+    worker.run(_req(project_root=str(tmp_path)))
+
+    cmd = runner.calls[0]["cmd"]
+    assert "--model" not in cmd
+    assert "--model-settings-file" not in cmd
+
+
+def test_settings_file_is_cleaned_up_after_run(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    import os as _os
+
+    monkeypatch.setenv("LLM_API_BASE", "https://llm-api.amd.com/Anthropic")
+    monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
+    monkeypatch.setenv(
+        "LLM_API_EXTRA_HEADERS", '{"Ocp-Apim-Subscription-Key": "abc"}'
+    )
+
+    runner = _FakeRunner()
+    worker = AiderWorker(subprocess_runner=runner)
+    worker.run(_req(project_root=str(tmp_path)))
+
+    cmd = runner.calls[0]["cmd"]
+    settings_path = cmd[cmd.index("--model-settings-file") + 1]
+    # _cleanup runs at the end of a successful invocation.
+    assert not _os.path.exists(settings_path)
+
+
 def test_select_worker_rejects_unknown_name() -> None:
     from ai_cockpit.nodes.coder import _select_worker
 
