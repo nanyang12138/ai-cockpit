@@ -1,6 +1,22 @@
-name: auto-merge-cursor-pr
+name: cursor-pr-automation
+
+# Two responsibilities, one file:
+#   1. open-pr   — when cron pushes a `cursor/**` branch, open a PR for it
+#                  if none exists, so the user no longer has to click "Create
+#                  pull request" in the UI.
+#   2. auto-merge — when validate finishes successfully on either a
+#                   `pull_request` event (humans / fork-style flow) or a
+#                   `push` to a `cursor/**` branch (cron flow), turn on
+#                   auto-merge for the matching PR.
+#
+# Why two triggers in one workflow: the cron-mode Cloud Agent token cannot
+# create PRs, and PRs created by GITHUB_TOKEN do NOT trigger `pull_request`
+# workflows. So we run validate from the push event, open the PR ourselves,
+# and key auto-merge off the push-side workflow_run as well.
 
 on:
+  push:
+    branches: ['cursor/**']
   workflow_run:
     workflows: ["validate"]
     types: [completed]
@@ -10,10 +26,54 @@ permissions:
   pull-requests: write
 
 jobs:
+  open-pr:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history for commit message)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Open PR if none exists for this cursor/** branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          existing=$(gh pr list --repo "$REPO" --state open --head "$BRANCH" \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$existing" ]; then
+            echo "Open PR #$existing already tracks $BRANCH; nothing to do."
+            exit 0
+          fi
+
+          title="$(git log -1 --pretty=%s)"
+          body="$(git log -1 --pretty=%b)"
+          if [ -z "$body" ]; then
+            body="Automated PR for branch \`$BRANCH\`."
+          fi
+
+          gh pr create \
+            --repo "$REPO" \
+            --base master \
+            --head "$BRANCH" \
+            --title "$title" \
+            --body "$body"
+
   auto-merge:
     if: >
+      github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'pull_request'
+      (
+        github.event.workflow_run.event == 'pull_request' ||
+        (
+          github.event.workflow_run.event == 'push' &&
+          startsWith(github.event.workflow_run.head_branch, 'cursor/')
+        )
+      )
     runs-on: ubuntu-latest
 
     steps:
@@ -52,10 +112,14 @@ jobs:
           AUTHOR=$(echo "$PR_JSON" | jq -r '.author.login')
           HEAD_REF=$(echo "$PR_JSON" | jq -r '.headRefName')
 
-          if [ "$AUTHOR" != "cursor[bot]" ] && [ "$AUTHOR" != "app/cursor" ] && [ "$AUTHOR" != "nanyang12138" ]; then
-            echo "Refusing to auto-merge PR authored by ${AUTHOR}"
-            exit 1
-          fi
+          case "$AUTHOR" in
+            cursor[bot] | app/cursor | nanyang12138 | github-actions[bot])
+              ;;
+            *)
+              echo "Refusing to auto-merge PR authored by ${AUTHOR}"
+              exit 1
+              ;;
+          esac
 
           case "$HEAD_REF" in
             cursor/*) ;;
