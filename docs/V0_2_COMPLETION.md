@@ -118,14 +118,21 @@ The four mock-LLM anti-deception tests in
 `tests/test_llm_planner_reviewer.py` are how CI keeps this honest;
 this run is how we proved the same property under a real model.
 
-### §15.1 — "failing test → green via Step-2 worker" ✅ VERIFIED (post v0.2)
+### §15.1 — "failing test → green via Step-2 worker" ✅ VERIFIED, then ✅ FULLY DEMONSTRATED
 
-Originally carried to v0.3 because Step 2 was deferred. Step 2 was
-implemented in PRs #20 / #21 (AiderWorker + `--worker` / `--apply`
-CLI), #22 (APIM bridge via `--model-settings-file`), and #24
-(`--no-gitignore` default). Real-LLM end-to-end run on the user's
-AMD work laptop, 2026-05-15 ~14:38 UTC, against
-`https://llm-api.amd.com/Anthropic` (claude-opus-4-6):
+The full Step 2 stack landed in PRs #20 / #21 (AiderWorker + CLI),
+#22 (APIM bridge via `--model-settings-file`), #24 (`--no-gitignore`
+default), #27 (`bug-fix.yaml` workflow with auto test-command
+defaults), and #28 (`examples/broken_calc/` runnable demo). The
+property was first observed on a README edit task on 2026-05-15
+~14:38 UTC (next section), then **fully and cleanly reproduced on
+a shell-verifiable failing-pytest task at ~15:19 UTC** (final
+section).
+
+#### Initial real-LLM observation (2026-05-15 ~14:38 UTC)
+
+User AMD work laptop, `https://llm-api.amd.com/Anthropic`
+(claude-opus-4-6):
 
 ```text
 ai-cockpit "在 README.md 文件最顶部加一行 'Requires Python 3.12+'" \
@@ -158,21 +165,126 @@ written "no other files modified" criterion (the `.gitignore`
 noise); PR #24 removes that noise so future runs of the same shape
 should reach `decision: done`.
 
-### spec §9 anti-deception — observed again on the same run ✅
+#### Clean reproduction on broken_calc fixture (2026-05-15 ~15:19 UTC)
 
-Same Step-2 demo run: even though aider's stdout proudly reported
-the modification, the reviewer (real Claude) noticed that the
-`.gitignore` change violated the planner's "no other files modified"
-criterion AND that no verification commands had been executed, and
-correctly returned `passed: False / risk: medium` with concrete,
-actionable issues. The reviewer prompt continues to receive only
-structured evidence; `coder_result` (aider's narrative output) is
-never piped into it.
+Same AMD endpoint, same env. Ran in
+`examples/broken_calc/` (shipped in PR #28; intentionally broken
+`add(a, b) -> a - b`):
 
-Two independent real-LLM runs (the planner-stub run from earlier in
-the day, and this real-aider run) have now demonstrated the
-anti-deception property under a real model. Mocks in CI continue to
-gate the same property programmatically.
+```text
+$ python3 -m pytest -q
+F.
+test_calc.py:16: assert -1 == 5
+FAILED test_calc.py::test_add_works
+
+$ ai-cockpit "make tests/test_calc.py pass by fixing calc.py" \
+    --workflow ../../.ai-cockpit/workflows/bug-fix.yaml \
+    --worker aider --apply --llm auto
+
+info: LLM enabled (anthropic:claude-opus-4-6)
+info: worker=aider --apply: aider WILL be invoked and may modify your working tree.
+========================================================================
+AI Cockpit — Run Summary
+========================================================================
+Mode:        task
+Loops:       1 / 3
+Decision:    done
+
+Coder Result:
+  AiderWorker exit_code=0
+  command: aider ... --no-gitignore --model anthropic/claude-opus-4-6
+           --model-settings-file /tmp/...aider-settings.yml --message <MESSAGE>
+  Model: anthropic/claude-opus-4-6 with whole edit format
+  Applied edit to examples/broken_calc/calc.py
+  Tokens: 6.7k sent, 316 received. Cost: $0.04 message, $0.04 session.
+
+Verification:
+  passed: True
+  - [ok] python -m pytest -q
+  - [ok] ruff check .
+  git status --short:
+   M calc.py
+
+Review:
+  passed: True
+  risk:   low
+  issues:
+  (none)
+  notes: minimal targeted fix; all pytest tests pass; ruff passes;
+         only calc.py was modified.
+========================================================================
+info: memory suggestion written: 20260515T151949-done-make-tests-test-calc-py
+
+$ python3 -m pytest -q
+..                                                                       [100%]
+
+$ git diff calc.py
+- def add(a: int, b: int) -> int:
+-     # BUG: should return a + b. ai-cockpit's bug-fix workflow targets this.
+-     return a - b
++ def add(a: int, b: int) -> int:
++     return a + b
+```
+
+Every invariant the v0.2 plan was racing toward is visible in this
+single run:
+
+- **§15.1**: failing test → real worker → green test, in **1 loop**
+  out of 3 allowed. `decision: done`, not `ask_human`. Shell-
+  verifiable: pytest's exit code, not visual inspection, ratifies
+  the result.
+- **§15.3**: from a vague prompt ("make tests/test_calc.py pass by
+  fixing calc.py"), the planner produced a concrete 5-item
+  acceptance list and a concrete `implementation_slice` aider could
+  execute directly.
+- **§9**: the reviewer saw only structured evidence (`mvp_spec`,
+  `acceptance_criteria`, `git_diff`, `git_status`,
+  `verification_result`) and judged on that alone. `Verification.
+  passed: True` was driven by the actual pytest + ruff exit codes
+  the bug-fix workflow's `defaults.verifier.test_commands` ran (PR
+  #27); the reviewer then ratified the diff matched the spec.
+- **PR #24 effect**: `git status --short` shows ONLY `M calc.py`.
+  Aider's `.aider*` chat-history artifacts now land in the parent
+  git root as untracked files (no `.gitignore` edit). Those
+  artifacts are runtime-only and out of scope for v0.2 / v0.3.
+
+Memory hook (PR #15 + #26): a `done` suggestion was written
+(`20260515T151949-done-make-tests-test-calc-py`) — the post-#26
+filter correctly kept it because the run was genuinely informative
+(non-empty diff, `decision: done`).
+
+This is the canonical reproducible §15.1 demo for the project. To
+re-run it: `cd examples/broken_calc && git checkout -- calc.py`
+then the same command line. The fixture itself is gated by
+`tests/test_demo_fixture.py` so a stray "fix" to `calc.py` cannot
+be merged without rewriting the guard.
+
+### spec §9 anti-deception — verified three times on real LLM ✅
+
+The reviewer's behavior was independently corroborated on three
+distinct real-LLM runs against the AMD APIM endpoint on 2026-05-15:
+
+1. ~13:23 UTC (LLM-on, stub worker): empty `git_diff` + upbeat
+   `coder_result` → reviewer returned `passed: False, risk: high`,
+   listed concrete issues, decision `ask_human`. The "looks
+   friendly" prose from the coder was correctly ignored.
+2. ~14:38 UTC (LLM-on, real Aider, README edit task): aider DID
+   modify README, but also auto-edited `.gitignore` (pre-PR #24)
+   and the user had not passed `--test-command`. Reviewer returned
+   `passed: False, risk: medium` flagging both the unrelated
+   `.gitignore` change and the unverified lint/test criteria.
+3. ~15:19 UTC (LLM-on, real Aider, broken_calc fixture, post-PRs
+   #24/#27): `.gitignore` no longer touched, `bug-fix.yaml`'s
+   default test commands ran, diff was minimal and targeted →
+   reviewer returned `passed: True, risk: low, issues: (none)`,
+   decision `done`. **The reviewer's signal is symmetric — it does
+   not lean toward rejection or acceptance; it follows the
+   evidence.**
+
+All three runs piped only structured evidence into the reviewer
+prompt; `coder_result` (aider's narrative self-report) was
+excluded throughout. Mocks in CI continue to gate the same
+property programmatically.
 
 ## AMD APIM proxy — operational notes
 
