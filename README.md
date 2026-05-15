@@ -126,8 +126,10 @@ current environment so `LLM_API_KEY` / `LLM_API_BASE` /
 them to aider's expected names (typically `ANTHROPIC_API_KEY` +
 `ANTHROPIC_API_BASE` for Anthropic-compatible endpoints) yourself
 when needed. Aider runs with `--yes-always --no-stream
---no-auto-commits` so it stays non-interactive and leaves its diff in
-the working tree for the verifier to pick up.
+--no-auto-commits --no-gitignore` so it stays non-interactive,
+leaves its diff in the working tree for the verifier to pick up,
+and does NOT touch your `.gitignore` (which would otherwise show
+up as unrelated noise in the reviewer's evidence).
 
 **APIM gateways (v0.3 step 2 follow-up):** when both
 `LLM_API_EXTRA_HEADERS` and `LLM_MODEL_NAME` are set, AiderWorker

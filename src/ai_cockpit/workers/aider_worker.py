@@ -39,6 +39,14 @@ DEFAULT_AIDER_ARGS: tuple[str, ...] = (
     "--yes-always",
     "--no-stream",
     "--no-auto-commits",
+    # Prevent aider from auto-appending '.aider*' entries to the user's
+    # .gitignore on every run. That extra modification breaks any
+    # planner-written acceptance criterion phrased as "no other files
+    # modified" and shows up in the reviewer's evidence as noise.
+    # Confirmed real on AMD APIM run 2026-05-15: aider always wrote
+    # .gitignore before this flag was set, even when the planner-spec
+    # only asked to change README.md.
+    "--no-gitignore",
 )
 
 
