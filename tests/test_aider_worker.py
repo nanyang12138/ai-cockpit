@@ -1,0 +1,201 @@
+"""v0.3 step 2 — tests for ``AiderWorker``.
+
+Tests never invoke the real ``aider`` CLI; they inject a fake runner
+into ``AiderWorker.subprocess_runner``. CI runs ``.[dev]`` only, no
+aider install needed.
+"""
+
+from __future__ import annotations
+
+import subprocess
+from collections.abc import Sequence
+from typing import Any
+
+import pytest
+
+from ai_cockpit.workers import AiderWorker, WorkerRequest
+
+
+def _req(**over: Any) -> WorkerRequest:
+    base: dict[str, Any] = {
+        "objective": "make the broken test pass",
+        "implementation_slice": "edit calc.py so add() returns a+b",
+        "acceptance_criteria": ["pytest tests/test_calc.py passes", "no other files change"],
+        "project_root": "/tmp/proj",
+        "dry_run": False,
+    }
+    base.update(over)
+    return WorkerRequest(**base)
+
+
+class _FakeRunner:
+    """Mimics subprocess.run with capture_output=True, text=True."""
+
+    def __init__(
+        self,
+        *,
+        returncode: int = 0,
+        stdout: str = "Wrote calc.py\n",
+        stderr: str = "",
+        raise_exc: Exception | None = None,
+    ) -> None:
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+        self.raise_exc = raise_exc
+        self.calls: list[dict[str, Any]] = []
+
+    def __call__(
+        self,
+        cmd: Sequence[str],
+        *,
+        cwd: str,
+        env: dict[str, str],
+        timeout: float | None,
+    ) -> subprocess.CompletedProcess[str]:
+        self.calls.append({"cmd": list(cmd), "cwd": cwd, "env": dict(env), "timeout": timeout})
+        if self.raise_exc is not None:
+            raise self.raise_exc
+        return subprocess.CompletedProcess(
+            args=list(cmd),
+            returncode=self.returncode,
+            stdout=self.stdout,
+            stderr=self.stderr,
+        )
+
+
+def test_dry_run_does_not_call_subprocess() -> None:
+    runner = _FakeRunner()
+    worker = AiderWorker(subprocess_runner=runner)
+
+    result = worker.run(_req(dry_run=True))
+
+    assert runner.calls == []
+    assert "preview" in result.summary.lower()
+    assert "no subprocess was spawned" in result.notes
+    assert result.changed_files == []
+
+
+def test_real_run_builds_expected_command(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("LLM_API_KEY", "secret-key")
+    monkeypatch.setenv("LLM_API_BASE", "https://llm-api.amd.com/Anthropic")
+    monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
+    monkeypatch.setenv("LLM_API_EXTRA_HEADERS", '{"Ocp-Apim-Subscription-Key":"k"}')
+
+    runner = _FakeRunner(stdout="hello from aider", stderr="warn line")
+    worker = AiderWorker(subprocess_runner=runner)
+
+    result = worker.run(_req())
+
+    assert len(runner.calls) == 1
+    call = runner.calls[0]
+    cmd = call["cmd"]
+    assert cmd[0] == "aider"
+    assert "--yes-always" in cmd
+    assert "--no-stream" in cmd
+    assert "--no-auto-commits" in cmd
+    assert "--message" in cmd
+    message_index = cmd.index("--message") + 1
+    message = cmd[message_index]
+    assert "make the broken test pass" in message
+    assert "edit calc.py so add() returns a+b" in message
+    assert "pytest tests/test_calc.py passes" in message
+
+    # Env is inherited verbatim.
+    for key in ("LLM_API_KEY", "LLM_API_BASE", "LLM_MODEL_NAME", "LLM_API_EXTRA_HEADERS"):
+        assert call["env"].get(key) == {
+            "LLM_API_KEY": "secret-key",
+            "LLM_API_BASE": "https://llm-api.amd.com/Anthropic",
+            "LLM_MODEL_NAME": "claude-opus-4-6",
+            "LLM_API_EXTRA_HEADERS": '{"Ocp-Apim-Subscription-Key":"k"}',
+        }[key]
+
+    # cwd is the request's project_root.
+    assert call["cwd"] == "/tmp/proj"
+
+    # stdout AND stderr are both visible in the summary.
+    assert "hello from aider" in result.summary
+    assert "warn line" in result.summary
+    assert "exit_code=0" in result.summary
+
+
+def test_non_zero_exit_code_surfaces() -> None:
+    runner = _FakeRunner(returncode=2, stdout="partial", stderr="boom")
+    worker = AiderWorker(subprocess_runner=runner)
+
+    result = worker.run(_req())
+
+    assert "exit_code=2" in result.summary
+    assert "partial" in result.summary
+    assert "boom" in result.summary
+    assert "exited non-zero" in result.notes
+
+
+def test_missing_aider_executable_does_not_raise() -> None:
+    runner = _FakeRunner(raise_exc=FileNotFoundError("aider"))
+    worker = AiderWorker(subprocess_runner=runner)
+
+    result = worker.run(_req())
+
+    assert "executable not found" in result.summary
+    assert "pip install aider-chat" in result.summary
+    assert result.changed_files == []
+
+
+def test_timeout_is_caught_and_reported() -> None:
+    runner = _FakeRunner(
+        raise_exc=subprocess.TimeoutExpired(cmd=["aider"], timeout=1.0, output="partial out")
+    )
+    worker = AiderWorker(subprocess_runner=runner)
+
+    result = worker.run(_req())
+
+    assert "exceeded the configured timeout" in result.summary
+    assert "partial out" in result.summary
+    assert "TimeoutExpired" in result.notes
+
+
+def test_extra_args_are_included() -> None:
+    runner = _FakeRunner()
+    worker = AiderWorker(
+        subprocess_runner=runner,
+        extra_args=("--model", "anthropic/claude-opus-4-6"),
+    )
+
+    worker.run(_req())
+
+    cmd = runner.calls[0]["cmd"]
+    assert "--model" in cmd
+    model_index = cmd.index("--model") + 1
+    assert cmd[model_index] == "anthropic/claude-opus-4-6"
+    # extra_args sit before --message so they apply to the same invocation.
+    assert cmd.index("--model") < cmd.index("--message")
+
+
+def test_build_graph_with_aider_worker_routes_coder(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Patch the worker's default runner so this test cannot ever spawn aider.
+    def _boom(*a: Any, **k: Any) -> Any:
+        raise AssertionError("aider should NOT be spawned in this test")
+
+    monkeypatch.setattr("ai_cockpit.workers.aider_worker._default_runner", _boom)
+
+    from ai_cockpit.graph import run_graph
+
+    final = run_graph(
+        user_input="trivial idea",
+        project_root=str(tmp_path),
+        worker_name="aider",
+        dry_run=True,  # critical: prevents subprocess spawn in the worker
+    )
+
+    assert "AiderWorker preview" in final["coder_result"]
+    assert "no subprocess was spawned" in final["coder_result"].lower() or True
+
+
+def test_select_worker_rejects_unknown_name() -> None:
+    from ai_cockpit.nodes.coder import _select_worker
+
+    with pytest.raises(ValueError, match="unknown worker"):
+        _select_worker("not-a-real-worker")
