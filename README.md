@@ -48,6 +48,34 @@ Optional flags:
 | `--mode MODE` | `exploration` | Either `exploration` or `task`. |
 | `--test-command CMD` | none | Shell command to run as a verification check. May be repeated. |
 | `--dry-run` | off | Skip running the test command(s); still collect git status/diff. |
+| `--llm MODE` | `none` | `none` keeps stub planner/reviewer (default). `auto` picks Anthropic vs OpenAI from env. `anthropic` / `openai` force a provider. |
+
+### LLM configuration (v0.2 step 1, opt-in)
+
+`--llm` reads credentials from the environment in this priority order:
+
+1. **Generic / proxy-friendly** — `LLM_API_KEY` + `LLM_API_BASE` + `LLM_MODEL_NAME`.
+   This is the only set that works with enterprise gateways such as
+   `https://llm-api.amd.com/Anthropic`.
+2. `ANTHROPIC_API_KEY` (default base `https://api.anthropic.com`).
+3. `OPENAI_API_KEY` (default base `https://api.openai.com/v1`).
+
+Auto-detect: if `LLM_API_BASE` contains `anthropic` or the model name
+starts with `claude`, the Anthropic-compatible client is used. Otherwise
+the OpenAI-compatible client is used. Override with `LLM_PROVIDER=openai`
+or `LLM_PROVIDER=anthropic`.
+
+Optional packages must be installed for the provider you select:
+
+```bash
+pip install -e ".[llm]"   # both providers
+pip install -e ".[anthropic]"
+pip install -e ".[openai]"
+```
+
+If credentials or the optional package are missing, the CLI prints a
+warning and falls back to the v0.1 stub planner/reviewer — runs never
+crash.
 
 Example:
 
@@ -86,10 +114,11 @@ source .venv/bin/activate
 python -m pytest
 ```
 
-## Known Limitations (v0.1)
+## Known Limitations (v0.1, partially addressed in v0.2 step 1)
 
-- Planner and reviewer are deterministic stubs; no LLM is called.
-- Coder is a `StubWorker` that never modifies files.
+- Planner and reviewer default to deterministic stubs; pass `--llm auto`
+  with credentials to enable real LLM calls (v0.2 step 1).
+- Coder is still a `StubWorker` that never modifies files.
 - No human-in-the-loop interrupts; `ask_human` is reported but not interactive.
 - No checkpoint persistence beyond the in-memory `TaskState`.
 - No real worker integration (Aider, Cursor SDK, OpenHands intentionally excluded).

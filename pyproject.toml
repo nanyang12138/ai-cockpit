@@ -14,9 +14,14 @@ dependencies = [
     "click>=8.1",
     "pydantic>=2.0",
     "langgraph>=0.2",
+    "langchain-core>=0.3",
 ]
 
 [project.optional-dependencies]
+# Optional providers; install only when --llm anthropic|openai|auto is used.
+anthropic = ["langchain-anthropic>=0.2"]
+openai = ["langchain-openai>=0.2"]
+llm = ["langchain-anthropic>=0.2", "langchain-openai>=0.2"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
