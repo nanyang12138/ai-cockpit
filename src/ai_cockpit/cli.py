@@ -1,4 +1,12 @@
-"""``ai-cockpit`` command-line entry point."""
+"""``ai-cockpit`` command-line entry point.
+
+v0.2 step 5b restructures the CLI into a ``click.Group`` so we can expose
+a ``memory`` subgroup for reviewing and applying suggestion blobs written
+by step 5a. Backward compatibility for the historical positional form
+``ai-cockpit "some idea" --flags`` is preserved by a ``_DefaultGroup``:
+if the first non-option token is not a registered subcommand, the group
+silently prepends ``run`` before dispatching.
+"""
 
 from __future__ import annotations
 
@@ -10,13 +18,54 @@ import click
 from ai_cockpit.checkpoint import new_thread_id
 from ai_cockpit.graph import run_graph
 from ai_cockpit.llm import build_llm
-from ai_cockpit.memory.suggestions import SuggestionError, generate_and_write
+from ai_cockpit.memory.suggestions import (
+    SuggestionError,
+    accept_suggestion,
+    generate_and_write,
+    list_suggestions,
+    load_suggestion,
+)
 from ai_cockpit.workflow import (
     Workflow,
     WorkflowError,
     default_workflow_path,
     load_workflow,
 )
+
+
+class _DefaultGroup(click.Group):
+    """Group that dispatches to ``run`` when no subcommand is given.
+
+    Without this shim, the v0.1 / early-v0.2 invocation
+    ``ai-cockpit "some idea" --flags`` would break the moment we add real
+    subcommands. We inspect the *first* non-option token: if it matches a
+    registered subcommand (``run`` / ``memory``) we let click route as usual;
+    otherwise we prepend ``run`` so the historical form keeps working.
+    Pure-option invocations (e.g. ``ai-cockpit --help``) are passed through
+    so the group's help still surfaces.
+    """
+
+    default_cmd_name = "run"
+
+    def parse_args(self, ctx: click.Context, args: list[str]) -> list[str]:
+        if args:
+            first_non_opt = next((a for a in args if not a.startswith("-")), None)
+            if first_non_opt is not None and first_non_opt not in self.commands:
+                args = [self.default_cmd_name, *args]
+        return super().parse_args(ctx, args)
+
+
+@click.group(
+    cls=_DefaultGroup,
+    name="ai-cockpit",
+    help=(
+        "Run the AI Cockpit idea-to-MVP execution loop, or manage memory "
+        "suggestions written by previous runs."
+    ),
+    context_settings={"help_option_names": ["-h", "--help"]},
+)
+def main() -> None:  # noqa: D401 - click group docstring is in the decorator
+    """Group entry point — actual work happens in subcommands."""
 
 
 def _resolve_workflow(project_root: str, override_path: str | None) -> Workflow | None:
@@ -59,9 +108,9 @@ def _apply_workflow_defaults(
     return mode, max_loops, test_commands
 
 
-@click.command(
-    name="ai-cockpit",
-    help="Run the AI Cockpit v0.1 idea-to-MVP execution loop on an idea.",
+@main.command(
+    name="run",
+    help="Run the idea-to-MVP execution loop on an idea (default subcommand).",
 )
 @click.argument("idea", nargs=-1, required=False)
 @click.option(
@@ -174,12 +223,12 @@ def _apply_workflow_defaults(
     show_default=True,
     help=(
         "After the run, write a memory-update suggestion JSON under "
-        ".ai-cockpit/suggestions/. A future `ai-cockpit memory accept` "
-        "subcommand applies it; until then, edit memory files by hand."
+        ".ai-cockpit/suggestions/. Inspect with `ai-cockpit memory list` "
+        "and apply with `ai-cockpit memory accept <id>`."
     ),
 )
 @click.pass_context
-def main(
+def run_cmd(
     ctx: click.Context,
     idea: tuple[str, ...],
     root: str,
@@ -262,9 +311,71 @@ def main(
                 click.echo(
                     f"info: memory suggestion written: {suggestion.id} "
                     f"(target={suggestion.target}); "
-                    "see .ai-cockpit/suggestions/ to review or apply.",
+                    "see `ai-cockpit memory list` to review or "
+                    "`ai-cockpit memory accept <id>` to apply.",
                     err=True,
                 )
+
+
+@main.group(
+    name="memory",
+    help="Inspect and apply memory-update suggestions written by previous runs.",
+)
+def memory_group() -> None:
+    """Memory-suggestion lifecycle subcommands."""
+
+
+_ROOT_OPTION = click.option(
+    "--root",
+    "root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+    help="Project root containing .ai-cockpit/suggestions/.",
+)
+
+
+@memory_group.command(name="list", help="List pending memory suggestions.")
+@_ROOT_OPTION
+def memory_list_cmd(root: str) -> None:
+    suggestions = list_suggestions(root)
+    if not suggestions:
+        click.echo("no pending memory suggestions")
+        return
+    for s in suggestions:
+        first_line = s.content.splitlines()[0] if s.content else ""
+        click.echo(f"{s.id}\t{s.target}\t{s.operation}\t{first_line}")
+
+
+@memory_group.command(name="show", help="Show one pending memory suggestion in full.")
+@click.argument("suggestion_id")
+@_ROOT_OPTION
+def memory_show_cmd(suggestion_id: str, root: str) -> None:
+    try:
+        s = load_suggestion(root, suggestion_id)
+    except SuggestionError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"id:         {s.id}")
+    click.echo(f"created_at: {s.created_at}")
+    click.echo(f"target:     {s.target}")
+    click.echo(f"operation:  {s.operation}")
+    click.echo(f"rationale:  {s.rationale}")
+    click.echo("---")
+    click.echo(s.content)
+
+
+@memory_group.command(
+    name="accept",
+    help="Apply a pending suggestion to its target memory file and archive it.",
+)
+@click.argument("suggestion_id")
+@_ROOT_OPTION
+def memory_accept_cmd(suggestion_id: str, root: str) -> None:
+    try:
+        target = accept_suggestion(root, suggestion_id)
+    except SuggestionError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo(f"applied {suggestion_id} -> {target}")
 
 
 if __name__ == "__main__":
