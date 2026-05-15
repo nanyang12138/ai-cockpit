@@ -199,3 +199,78 @@ def test_select_worker_rejects_unknown_name() -> None:
 
     with pytest.raises(ValueError, match="unknown worker"):
         _select_worker("not-a-real-worker")
+
+
+# CLI integration (v0.3 step 2b)
+
+
+def test_cli_apply_requires_aider_worker(tmp_path) -> None:
+    from click.testing import CliRunner
+
+    from ai_cockpit.cli import main as cli_main
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        ["run", "idea", "--root", str(tmp_path), "--no-checkpoint", "--apply"],
+    )
+    assert result.exit_code != 0
+    assert "--apply is only meaningful with --worker aider" in result.output
+
+
+def test_cli_apply_conflicts_with_dry_run(tmp_path) -> None:
+    from click.testing import CliRunner
+
+    from ai_cockpit.cli import main as cli_main
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        [
+            "run",
+            "idea",
+            "--root",
+            str(tmp_path),
+            "--no-checkpoint",
+            "--worker",
+            "aider",
+            "--apply",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code != 0
+    assert "--apply and --dry-run are mutually exclusive" in result.output
+
+
+def test_cli_aider_preview_only_does_not_invoke_subprocess(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from click.testing import CliRunner
+
+    from ai_cockpit.cli import main as cli_main
+
+    spawned: list[Any] = []
+
+    def _boom(*a: Any, **k: Any) -> Any:
+        spawned.append((a, k))
+        raise AssertionError("aider should NOT have been spawned without --apply")
+
+    monkeypatch.setattr("ai_cockpit.workers.aider_worker._default_runner", _boom)
+
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        [
+            "run",
+            "trivial idea",
+            "--root",
+            str(tmp_path),
+            "--no-checkpoint",
+            "--worker",
+            "aider",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert spawned == []
+    assert "preview-only" in result.output

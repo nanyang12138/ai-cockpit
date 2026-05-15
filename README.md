@@ -48,6 +48,8 @@ Optional flags:
 | `--mode MODE` | `exploration` | Either `exploration` or `task`. |
 | `--test-command CMD` | none | Shell command to run as a verification check. May be repeated. |
 | `--dry-run` | off | Skip running the test command(s); still collect git status/diff. |
+| `--worker MODE` | `stub` | `stub` (default) never modifies files. `aider` spawns the `aider` CLI to execute the implementation slice; requires `--apply` to actually edit (preview-only otherwise). |
+| `--apply` | off | Opt-in for `--worker aider`: actually invoke aider so it can modify files. Mutually exclusive with `--dry-run`. Ignored for `--worker stub`. |
 | `--llm MODE` | `none` | `none` keeps stub planner/reviewer (default). `auto` picks Anthropic vs OpenAI from env. `anthropic` / `openai` force a provider. |
 | `--thread-id ID` | auto-minted | Explicit thread id under which this run is persisted. When omitted, a fresh id is generated and printed to stderr. |
 | `--resume` | off | Boolean flag. Resume the run identified by `--thread-id` from its last checkpoint. Requires `--thread-id`; the idea argument is ignored. |
@@ -97,6 +99,42 @@ pip install -e ".[openai]"
 If credentials or the optional package are missing, the CLI prints a
 warning and falls back to the v0.1 stub planner/reviewer — runs never
 crash.
+
+### Coder worker (v0.3 step 2, opt-in)
+
+By default the coder node uses `StubWorker` and never touches files —
+this is the v0.1 behavior and is safe for every CI / smoke run. Pass
+`--worker aider` to route the implementation slice through the
+[`aider`](https://aider.chat/) CLI instead:
+
+```bash
+pip install aider-chat
+ai-cockpit "fix the failing test in tests/test_calc.py" --worker aider
+```
+
+**Safety default: `--worker aider` is preview-only.** Without `--apply`
+the worker prints the message it *would* send to aider but spawns no
+subprocess. To actually let aider edit your working tree:
+
+```bash
+ai-cockpit "fix the failing test" --worker aider --apply --llm auto
+```
+
+`--apply` is mutually exclusive with `--dry-run`. Aider inherits the
+current environment so `LLM_API_KEY` / `LLM_API_BASE` /
+`LLM_MODEL_NAME` / `LLM_API_EXTRA_HEADERS` reach it unchanged; map
+them to aider's expected names (typically `ANTHROPIC_API_KEY` +
+`ANTHROPIC_API_BASE` for Anthropic-compatible endpoints) yourself
+when needed. Aider runs with `--yes-always --no-stream
+--no-auto-commits` so it stays non-interactive and leaves its diff in
+the working tree for the verifier to pick up.
+
+> **Note on dependency conflicts:** `pip install aider-chat` may
+> downgrade the `openai` package to a version that's incompatible
+> with `langchain-openai`. This is harmless if you use `--llm auto`
+> against an Anthropic-compatible endpoint (the OpenAI client is
+> never loaded). If you need both, install aider into a separate
+> virtualenv.
 
 ### Checkpoint & resume (v0.2 step 3, on by default)
 

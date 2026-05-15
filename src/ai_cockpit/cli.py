@@ -227,6 +227,30 @@ def _apply_workflow_defaults(
         "and apply with `ai-cockpit memory accept <id>`."
     ),
 )
+@click.option(
+    "--worker",
+    "worker_name",
+    default="stub",
+    show_default=True,
+    type=click.Choice(["stub", "aider"], case_sensitive=False),
+    help=(
+        "Which worker executes the implementation slice. 'stub' (default) "
+        "never modifies the working tree. 'aider' spawns the aider CLI; "
+        "to actually let aider write files you must also pass --apply, "
+        "otherwise the worker only previews the message it would send."
+    ),
+)
+@click.option(
+    "--apply",
+    "apply",
+    is_flag=True,
+    default=False,
+    help=(
+        "For --worker aider: opt in to actually invoking aider so it can "
+        "modify files. Without --apply, aider is never spawned (preview-only). "
+        "Ignored when --worker stub. Mutually exclusive with --dry-run."
+    ),
+)
 @click.pass_context
 def run_cmd(
     ctx: click.Context,
@@ -243,6 +267,8 @@ def run_cmd(
     checkpoint_db: str | None,
     workflow_path: str | None,
     suggest: bool,
+    worker_name: str,
+    apply: bool,
 ) -> None:
     if no_checkpoint and (thread_id or resume or checkpoint_db):
         raise click.UsageError(
@@ -252,6 +278,14 @@ def run_cmd(
 
     if resume and not thread_id:
         raise click.UsageError("--resume requires --thread-id")
+
+    worker_name = (worker_name or "stub").lower()
+    if apply and worker_name != "aider":
+        raise click.UsageError("--apply is only meaningful with --worker aider")
+    if apply and dry_run:
+        raise click.UsageError("--apply and --dry-run are mutually exclusive")
+    # Safety default: aider worker is preview-only unless --apply is set.
+    effective_dry_run = dry_run or (worker_name == "aider" and not apply)
 
     user_input = " ".join(idea).strip() if idea else ""
     if not resume and not user_input:
@@ -288,17 +322,32 @@ def run_cmd(
     elif effective_thread_id is not None:
         click.echo(f"info: persisting run as thread {effective_thread_id}", err=True)
 
+    if worker_name == "aider":
+        if apply:
+            click.echo(
+                "info: worker=aider --apply: aider WILL be invoked and may modify "
+                "your working tree.",
+                err=True,
+            )
+        else:
+            click.echo(
+                "info: worker=aider preview-only (no --apply): aider will NOT be "
+                "spawned; pass --apply to let it edit files.",
+                err=True,
+            )
+
     final_state = run_graph(
         user_input=user_input,
         project_root=project_root,
         mode=mode,
         max_loops=max_loops,
         test_commands=list(test_commands),
-        dry_run=dry_run,
+        dry_run=effective_dry_run,
         llm=llm,
         checkpoint_db=checkpoint_db,
         thread_id=effective_thread_id,
         resume=resume,
+        worker_name=worker_name,
     )
 
     if suggest and final_state is not None:
