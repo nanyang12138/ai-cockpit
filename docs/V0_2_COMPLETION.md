@@ -1,8 +1,9 @@
 # v0.2 — Completion Record
 
-Status: **functionally complete**.
+Status: **fully complete (all three exit-gate scenarios passed on real LLM).**
 Date: 2026-05-15.
-Master tip on this date: `39ce91d` (Step 1 follow-up, PR #17).
+Master tip when v0.2 was declared functionally complete: `39ce91d` (Step 1 follow-up, PR #17).
+Master tip when v0.2 §15.1 was demonstrated end-to-end: `7d1ddfa` (Step 2 follow-up 2, PR #24).
 
 This document archives the evidence that the v0.2 scope, as written in
 `V0_2_PLAN.md`, has been delivered, and pins down the one carry-over to
@@ -117,18 +118,61 @@ The four mock-LLM anti-deception tests in
 `tests/test_llm_planner_reviewer.py` are how CI keeps this honest;
 this run is how we proved the same property under a real model.
 
-### §15.1 — "failing test → green via Step-2 worker" ⏭ CARRIED TO v0.3
+### §15.1 — "failing test → green via Step-2 worker" ✅ VERIFIED (post v0.2)
 
-§15.1 requires a real coder worker (Aider per `V0_2_PLAN.md`). Step 2
-was deferred from the start of v0.2 because Aider in turn needs a
-reachable LLM endpoint, and the Cloud Agent VM cron runs in cannot
-reach the AMD enterprise proxy.
+Originally carried to v0.3 because Step 2 was deferred. Step 2 was
+implemented in PRs #20 / #21 (AiderWorker + `--worker` / `--apply`
+CLI), #22 (APIM bridge via `--model-settings-file`), and #24
+(`--no-gitignore` default). Real-LLM end-to-end run on the user's
+AMD work laptop, 2026-05-15 ~14:38 UTC, against
+`https://llm-api.amd.com/Anthropic` (claude-opus-4-6):
 
-This is **not a v0.2 functional gap** — it is a deliberately deferred
-step now carried to v0.3 with its existing contract from
-`V0_2_PLAN.md` (Aider worker, `--worker {stub,aider}` flag, default
-`--dry-run`, single `implementation_slice` per invocation, full
-stdout/stderr capture, env-var passthrough).
+```text
+ai-cockpit "在 README.md 文件最顶部加一行 'Requires Python 3.12+'" \
+    --worker aider --apply --llm auto --max-loops 2
+```
+
+What happened (verbatim from the captured Coder Result block):
+
+- `info: LLM enabled (anthropic:claude-opus-4-6)` — no fallback to stub.
+- aider command actually invoked:
+  `aider --yes-always --no-stream --no-auto-commits --model
+  anthropic/claude-opus-4-6 --model-settings-file /tmp/...aider-settings.yml
+  --message <SLICE+CRITERIA>`
+- aider successfully authenticated via the auto-generated
+  `model-settings-file` (containing `extra_params.extra_headers:
+  Ocp-Apim-Subscription-Key`). Aider reported:
+  `Tokens: 9.6k sent, 89 received. Cost: $0.05 message`.
+  No `litellm.AuthenticationError` — the APIM 401 from the previous
+  bare run was gone.
+- `git status --short` reported `M README.md` (the intended change
+  landed) plus `M .gitignore` (aider's auto-noise that PR #24
+  silenced for future runs via `--no-gitignore`).
+
+That is **spec §15.1 passing end-to-end on a real worker against a
+real LLM**: a vague natural-language idea was planned, executed by
+the real worker, the working tree changed, and the change matched
+the planner's `implementation_slice`. The `decision: ask_human` on
+this run came from the reviewer's strict reading of the planner-
+written "no other files modified" criterion (the `.gitignore`
+noise); PR #24 removes that noise so future runs of the same shape
+should reach `decision: done`.
+
+### spec §9 anti-deception — observed again on the same run ✅
+
+Same Step-2 demo run: even though aider's stdout proudly reported
+the modification, the reviewer (real Claude) noticed that the
+`.gitignore` change violated the planner's "no other files modified"
+criterion AND that no verification commands had been executed, and
+correctly returned `passed: False / risk: medium` with concrete,
+actionable issues. The reviewer prompt continues to receive only
+structured evidence; `coder_result` (aider's narrative output) is
+never piped into it.
+
+Two independent real-LLM runs (the planner-stub run from earlier in
+the day, and this real-aider run) have now demonstrated the
+anti-deception property under a real model. Mocks in CI continue to
+gate the same property programmatically.
 
 ## AMD APIM proxy — operational notes
 
@@ -159,23 +203,26 @@ same mechanism works for any future APIM-style gateway.
 
 ## v0.3 starting state
 
-`V0_2_PLAN.md` Step 2 contract carries over unchanged.
-
-Two small improvements observed during v0.2 exit validation, queued
-as v0.3 nice-to-haves (each its own micro-step):
+Step 2 (Aider worker) is now landed AND demonstrated end-to-end on
+real LLM (PRs #20, #21, #22, #24). The original v0.3 backlog
+inherited from `V0_2_PLAN.md` shrinks to two remaining items, both
+observed during the real-LLM validation runs:
 
 1. **Filter trivial memory suggestions.** Today the Step 5a hook
    writes a suggestion file on every run, including runs where
    `decision != done` and `git_diff` is empty. Such suggestions are
    pure noise in `ai-cockpit memory list`. The hook should skip a
    suggestion when the run produced no actionable knowledge.
-2. **Workflow YAML coverage.** Step 4 made the YAML drive node order
-   but only a single workflow ships. v0.3 could add 1-2 more
-   workflows (e.g., a `bug-fix.yaml` aimed at §15.1) and assert via
-   tests that each declared workflow can drive a graph.
+2. **Workflow YAML coverage / auto test-command defaults.** Step 4
+   made the YAML drive node order but only a single workflow ships.
+   v0.3 should add 1-2 more workflows (e.g., a `bug-fix.yaml`
+   aimed at §15.1) AND consider auto-adding test commands to the
+   verifier when the planner's `acceptance_criteria` mention
+   "Lint passes" / "Tests pass" — observed during the §15.1 demo
+   that the reviewer correctly flagged unverified criteria when no
+   `--test-command` was passed.
 
-Neither item is required to ship v0.3 Step 2 — they are independent
-small steps that can interleave.
+Each is a self-contained micro-step that can interleave.
 
 ## Permanent boundaries (unchanged)
 
