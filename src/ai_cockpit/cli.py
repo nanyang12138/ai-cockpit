@@ -10,6 +10,7 @@ import click
 from ai_cockpit.checkpoint import new_thread_id
 from ai_cockpit.graph import run_graph
 from ai_cockpit.llm import build_llm
+from ai_cockpit.memory.suggestions import SuggestionError, generate_and_write
 from ai_cockpit.workflow import (
     Workflow,
     WorkflowError,
@@ -166,6 +167,17 @@ def _apply_workflow_defaults(
         "--test-command; explicit CLI flags always win."
     ),
 )
+@click.option(
+    "--suggest/--no-suggest",
+    "suggest",
+    default=True,
+    show_default=True,
+    help=(
+        "After the run, write a memory-update suggestion JSON under "
+        ".ai-cockpit/suggestions/. A future `ai-cockpit memory accept` "
+        "subcommand applies it; until then, edit memory files by hand."
+    ),
+)
 @click.pass_context
 def main(
     ctx: click.Context,
@@ -181,6 +193,7 @@ def main(
     no_checkpoint: bool,
     checkpoint_db: str | None,
     workflow_path: str | None,
+    suggest: bool,
 ) -> None:
     if no_checkpoint and (thread_id or resume or checkpoint_db):
         raise click.UsageError(
@@ -226,7 +239,7 @@ def main(
     elif effective_thread_id is not None:
         click.echo(f"info: persisting run as thread {effective_thread_id}", err=True)
 
-    run_graph(
+    final_state = run_graph(
         user_input=user_input,
         project_root=project_root,
         mode=mode,
@@ -238,6 +251,20 @@ def main(
         thread_id=effective_thread_id,
         resume=resume,
     )
+
+    if suggest and final_state is not None:
+        try:
+            suggestion = generate_and_write(project_root, final_state)
+        except SuggestionError as exc:
+            click.echo(f"warning: could not write memory suggestion: {exc}", err=True)
+        else:
+            if suggestion is not None:
+                click.echo(
+                    f"info: memory suggestion written: {suggestion.id} "
+                    f"(target={suggestion.target}); "
+                    "see .ai-cockpit/suggestions/ to review or apply.",
+                    err=True,
+                )
 
 
 if __name__ == "__main__":
