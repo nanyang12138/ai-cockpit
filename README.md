@@ -232,6 +232,13 @@ ai-cockpit "Build a tiny CLI that summarizes meeting notes" \
   --test-command "python -m pytest -q"
 ```
 
+## Roadmap
+
+Next work is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md): a
+cron-safe backlog (Section A) that runs unattended overnight, a
+needs-user-direction backlog (Section B), and the permanent
+out-of-scope list (Section C, mirroring spec §12).
+
 ## Project Layout
 
 ```
