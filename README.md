@@ -180,6 +180,10 @@ Explicit CLI flags (`--mode`, `--max-loops`, `--test-command`) always
 win over YAML defaults. YAML node order MUST match
 `src/ai_cockpit/graph.py`; the loader refuses to start otherwise.
 
+A runnable §15.1 end-to-end demo (deliberately broken calc + failing
+pytest, fixed by aider via the `bug-fix.yaml` workflow) lives under
+[`examples/broken_calc/`](examples/broken_calc/README.md).
+
 ### Checkpoint & resume (v0.2 step 3, on by default)
 
 Every run is persisted via LangGraph's `SqliteSaver` to
