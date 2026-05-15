@@ -237,3 +237,121 @@ def test_build_llm_returns_none_for_none_mode(monkeypatch: pytest.MonkeyPatch) -
 
     monkeypatch.setenv("LLM_API_KEY", "fake")
     assert build_llm("none") is None
+
+
+# ---------------------------------------------------------------------------
+# Step 1 follow-up: LLM_API_EXTRA_HEADERS must be threaded into the
+# underlying client as ``default_headers``. This is the only way to make
+# ai-cockpit work with enterprise gateways such as Azure APIM, which sit
+# in front of providers like AMD's ``https://llm-api.amd.com/Anthropic``
+# and require an extra ``Ocp-Apim-Subscription-Key`` header on every
+# request. The codepath stays generic — no provider's header name is
+# hardcoded anywhere.
+# ---------------------------------------------------------------------------
+
+
+def _install_fake_anthropic(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Inject a fake ``langchain_anthropic`` module that captures kwargs."""
+
+    import sys
+    import types
+
+    captured: dict[str, Any] = {}
+
+    class _FakeChatAnthropic:
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+
+        def invoke(self, _messages: Any) -> Any:
+            class _R:
+                content = ""
+
+            return _R()
+
+    fake_mod = types.ModuleType("langchain_anthropic")
+    fake_mod.ChatAnthropic = _FakeChatAnthropic  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "langchain_anthropic", fake_mod)
+    return captured
+
+
+def test_extra_headers_threaded_into_anthropic_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ai_cockpit.llm import build_llm
+
+    captured = _install_fake_anthropic(monkeypatch)
+    monkeypatch.setenv("LLM_API_KEY", "fake-key")
+    monkeypatch.setenv("LLM_API_BASE", "https://llm-api.amd.com/Anthropic")
+    monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
+    monkeypatch.setenv(
+        "LLM_API_EXTRA_HEADERS", '{"Ocp-Apim-Subscription-Key": "abc123"}'
+    )
+
+    provider = build_llm("auto")
+    assert provider is not None
+    assert provider.name == "anthropic:claude-opus-4-6"
+    assert captured.get("default_headers") == {"Ocp-Apim-Subscription-Key": "abc123"}
+    assert captured.get("api_key") == "fake-key"
+    assert captured.get("base_url") == "https://llm-api.amd.com/Anthropic"
+
+
+def test_no_extra_headers_means_no_default_headers_kwarg(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ai_cockpit.llm import build_llm
+
+    captured = _install_fake_anthropic(monkeypatch)
+    monkeypatch.setenv("LLM_API_KEY", "fake-key")
+    monkeypatch.setenv("LLM_API_BASE", "https://llm-api.amd.com/Anthropic")
+    monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
+    monkeypatch.delenv("LLM_API_EXTRA_HEADERS", raising=False)
+
+    provider = build_llm("auto")
+    assert provider is not None
+    assert "default_headers" not in captured
+
+
+def test_malformed_extra_headers_does_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ai_cockpit.llm import build_llm
+
+    captured = _install_fake_anthropic(monkeypatch)
+    monkeypatch.setenv("LLM_API_KEY", "fake-key")
+    monkeypatch.setenv("LLM_API_BASE", "https://llm-api.amd.com/Anthropic")
+    monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
+    # Not valid JSON at all:
+    monkeypatch.setenv("LLM_API_EXTRA_HEADERS", "not-json{")
+
+    provider = build_llm("auto")
+    assert provider is not None
+    assert "default_headers" not in captured
+
+
+def test_non_object_extra_headers_does_not_crash(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ai_cockpit.llm import build_llm
+
+    captured = _install_fake_anthropic(monkeypatch)
+    monkeypatch.setenv("LLM_API_KEY", "fake-key")
+    monkeypatch.setenv("LLM_API_BASE", "https://llm-api.amd.com/Anthropic")
+    monkeypatch.setenv("LLM_MODEL_NAME", "claude-opus-4-6")
+    # Valid JSON but not an object:
+    monkeypatch.setenv("LLM_API_EXTRA_HEADERS", '["a", "b"]')
+
+    provider = build_llm("auto")
+    assert provider is not None
+    assert "default_headers" not in captured
+
+
+def test_resolve_extra_headers_unit() -> None:
+    """Unit-test the parser directly so we don't rely on the fake client."""
+
+    import os
+
+    from ai_cockpit.llm.provider import _resolve_extra_headers
+
+    os.environ.pop("LLM_API_EXTRA_HEADERS", None)
+    assert _resolve_extra_headers() is None
+
+    os.environ["LLM_API_EXTRA_HEADERS"] = '{"X-Foo": "bar", "X-Num": 7}'
+    try:
+        result = _resolve_extra_headers()
+        assert result == {"X-Foo": "bar", "X-Num": "7"}
+    finally:
+        os.environ.pop("LLM_API_EXTRA_HEADERS", None)
