@@ -112,8 +112,21 @@ jobs:
           AUTHOR=$(echo "$PR_JSON" | jq -r '.author.login')
           HEAD_REF=$(echo "$PR_JSON" | jq -r '.headRefName')
 
+          # Allow-list of PR authors permitted to auto-merge. Notes:
+          # * `gh pr view --json author --jq '.author.login'` returns the
+          #   raw login string. For GitHub Apps that string is prefixed
+          #   with `app/` (e.g. `app/github-actions`, `app/cursor`).
+          # * `app/github-actions` is the author when this workflow's
+          #   own `open-pr` job runs `gh pr create` with GITHUB_TOKEN.
+          # * Literal `cursor[bot]` / `github-actions[bot]` patterns must
+          #   NOT be used here: bash interprets `[bot]` as a glob
+          #   character class, so those patterns would only match
+          #   `cursorb` / `cursoro` / `cursort` — never the real login.
+          # * Plain `cursor` and `github-actions` are kept as forward
+          #   compatibility for gh CLI versions that drop the `app/`
+          #   prefix.
           case "$AUTHOR" in
-            cursor[bot] | app/cursor | nanyang12138 | github-actions[bot])
+            nanyang12138 | cursor | app/cursor | github-actions | app/github-actions)
               ;;
             *)
               echo "Refusing to auto-merge PR authored by ${AUTHOR}"
