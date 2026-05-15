@@ -72,20 +72,29 @@ from ai_cockpit.llm import build_llm
     default=None,
     type=str,
     help=(
-        "Persist this run under the given thread id (enables SQLite "
-        "checkpointing). Use the same id later with --resume to continue."
+        "Explicit thread id under which this run is persisted. When omitted "
+        "and checkpointing is enabled (the default), a fresh id is minted "
+        "and printed to stderr."
     ),
 )
 @click.option(
     "--resume",
-    "resume_thread",
-    default=None,
-    type=str,
-    metavar="THREAD_ID",
+    "resume",
+    is_flag=True,
+    default=False,
     help=(
-        "Resume the run identified by THREAD_ID from the last saved "
-        "checkpoint. Mutually exclusive with --thread-id; idea argument "
-        "is ignored when resuming."
+        "Resume the run identified by --thread-id from its last saved "
+        "checkpoint. Requires --thread-id; idea argument is ignored."
+    ),
+)
+@click.option(
+    "--no-checkpoint",
+    "no_checkpoint",
+    is_flag=True,
+    default=False,
+    help=(
+        "Disable SQLite checkpointing for this run (no DB writes). "
+        "Mutually exclusive with --thread-id / --resume / --checkpoint-db."
     ),
 )
 @click.option(
@@ -108,22 +117,22 @@ def main(
     dry_run: bool,
     llm_mode: str,
     thread_id: str | None,
-    resume_thread: str | None,
+    resume: bool,
+    no_checkpoint: bool,
     checkpoint_db: str | None,
 ) -> None:
-    if thread_id and resume_thread:
-        raise click.UsageError("--thread-id and --resume are mutually exclusive")
+    if no_checkpoint and (thread_id or resume or checkpoint_db):
+        raise click.UsageError(
+            "--no-checkpoint cannot be combined with --thread-id, --resume, "
+            "or --checkpoint-db"
+        )
 
-    resume = resume_thread is not None
-    effective_thread_id = resume_thread if resume else thread_id
+    if resume and not thread_id:
+        raise click.UsageError("--resume requires --thread-id")
 
-    if resume:
-        # idea argument is optional / ignored when resuming
-        user_input = " ".join(idea).strip() if idea else ""
-    else:
-        user_input = " ".join(idea).strip() if idea else ""
-        if not user_input:
-            raise click.UsageError("idea must be a non-empty string")
+    user_input = " ".join(idea).strip() if idea else ""
+    if not resume and not user_input:
+        raise click.UsageError("idea must be a non-empty string")
 
     project_root = str(Path(root).resolve())
 
@@ -138,16 +147,18 @@ def main(
     elif llm is not None:
         click.echo(f"info: LLM enabled ({llm.name})", err=True)
 
-    # If the user enabled checkpointing without supplying an id, mint one
-    # so they can resume later.
-    if not resume and effective_thread_id is None and checkpoint_db is not None:
+    effective_thread_id: str | None = thread_id
+    if not no_checkpoint and not resume and effective_thread_id is None:
         effective_thread_id = new_thread_id()
-        click.echo(f"info: checkpoint thread id: {effective_thread_id}", err=True)
-
-    if effective_thread_id is not None and not resume:
-        click.echo(f"info: persisting run as thread {effective_thread_id}", err=True)
+        click.echo(
+            f"info: checkpointing enabled, thread id: {effective_thread_id} "
+            "(use --no-checkpoint to disable)",
+            err=True,
+        )
     elif resume:
         click.echo(f"info: resuming thread {effective_thread_id}", err=True)
+    elif effective_thread_id is not None:
+        click.echo(f"info: persisting run as thread {effective_thread_id}", err=True)
 
     run_graph(
         user_input=user_input,
