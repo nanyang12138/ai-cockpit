@@ -13,6 +13,7 @@ import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -115,7 +116,7 @@ def test_build_suggestion_skips_ask_human_with_empty_diff() -> None:
     project.md only adds noise to ``ai-cockpit memory list``.
     """
 
-    cases = [
+    cases: list[dict[str, Any]] = [
         {"decision": "ask_human"},  # no verification_result at all
         {
             "decision": "ask_human",
