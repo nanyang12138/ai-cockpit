@@ -13,6 +13,7 @@ import json
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 from click.testing import CliRunner
@@ -84,9 +85,60 @@ def test_build_suggestion_skips_uninteresting_runs(overrides: dict) -> None:
     assert build_suggestion_from_state(_state(**overrides)) is None
 
 
-def test_build_suggestion_handles_ask_human_decision() -> None:
-    s = build_suggestion_from_state(_state(decision="ask_human"))
+def test_build_suggestion_keeps_ask_human_with_real_diff() -> None:
+    """ask_human runs that produced a real diff are informative and kept.
+
+    Example from real-LLM validation 2026-05-15: aider made edits but
+    the reviewer rejected unverified lint/test criteria — the diff is
+    worth remembering in project.md.
+    """
+
+    s = build_suggestion_from_state(
+        _state(
+            decision="ask_human",
+            verification_result={
+                "passed": True,
+                "commands": [],
+                "git_diff": "diff --git a/README.md b/README.md\n+ Requires Python 3.12+\n",
+                "git_status": " M README.md",
+            },
+        )
+    )
     assert s is not None and "decision: ask_human" in s.content
+
+
+def test_build_suggestion_skips_ask_human_with_empty_diff() -> None:
+    """ask_human + empty diff is pure noise: coder did nothing.
+
+    This is the case where the stub worker (or a worker that failed
+    to authenticate) didn't touch the working tree, so the reviewer
+    correctly returned passed=False. Recording such runs in
+    project.md only adds noise to ``ai-cockpit memory list``.
+    """
+
+    cases: list[dict[str, Any]] = [
+        {"decision": "ask_human"},  # no verification_result at all
+        {
+            "decision": "ask_human",
+            "verification_result": {
+                "passed": False,
+                "commands": [],
+                "git_diff": "",
+                "git_status": "",
+            },
+        },
+        {
+            "decision": "ask_human",
+            "verification_result": {
+                "passed": False,
+                "commands": [],
+                "git_diff": "   \n  ",
+                "git_status": "",
+            },
+        },
+    ]
+    for overrides in cases:
+        assert build_suggestion_from_state(_state(**overrides)) is None
 
 
 @pytest.mark.parametrize(
