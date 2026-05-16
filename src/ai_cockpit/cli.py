@@ -28,6 +28,7 @@ from ai_cockpit.memory.suggestions import (
     list_suggestions,
     load_suggestion,
 )
+from ai_cockpit.planner_interactive import run_interactive_planner
 from ai_cockpit.tools.git import is_git_repo
 from ai_cockpit.tools.shell import run_command
 from ai_cockpit.workflow import (
@@ -469,6 +470,101 @@ def run_cmd(
                     "`ai-cockpit memory accept <id>` to apply.",
                     err=True,
                 )
+
+
+# ---------------------------------------------------------------------------
+# interactive planner command (B.9a)
+# ---------------------------------------------------------------------------
+
+
+@main.command(
+    name="plan",
+    help="Interactively discuss and save a human-approved plan artifact.",
+)
+@click.argument("idea", nargs=-1, required=True)
+@click.option(
+    "--root",
+    "root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+    help="Project root to inspect and where docs/plans/ is written.",
+)
+@click.option(
+    "--output",
+    "output",
+    default=None,
+    type=click.Path(dir_okay=False, resolve_path=True),
+    help="Optional plan YAML path. Defaults to docs/plans/<plan_id>.plan.yaml.",
+)
+@click.option(
+    "--llm",
+    "llm_mode",
+    default="auto",
+    show_default=True,
+    type=click.Choice(["none", "auto", "anthropic", "openai"], case_sensitive=False),
+    help="'none' uses the deterministic B.9a fixture; real LLM support is B.9c.",
+)
+@click.option(
+    "--backend",
+    "backend",
+    default="builtin",
+    show_default=True,
+    type=click.Choice(["builtin", "cursor"], case_sensitive=False),
+    help="Planner backend. B.9a implements only the builtin fixture backend.",
+)
+@click.option(
+    "--max-slices",
+    "max_slices",
+    default=None,
+    type=click.IntRange(min=1),
+    help="Optional save-time cap on draft slice count.",
+)
+@click.option(
+    "--max-turns",
+    "max_turns",
+    default=12,
+    show_default=True,
+    type=click.IntRange(min=1, max=100),
+    help="Maximum feedback turns before warning the user.",
+)
+@click.option(
+    "--max-tool-bytes",
+    "max_tool_bytes",
+    default=12000,
+    show_default=True,
+    type=click.IntRange(min=1000, max=100000),
+    help="Reserved for B.9b read-only tool output clipping.",
+)
+def plan_cmd(
+    idea: tuple[str, ...],
+    root: str,
+    output: str | None,
+    llm_mode: str,
+    backend: str,
+    max_slices: int | None,
+    max_turns: int,
+    max_tool_bytes: int,
+) -> None:
+    """Start the B.9 interactive planning REPL."""
+
+    user_input = " ".join(idea).strip()
+    if not user_input:
+        raise click.UsageError("idea must be a non-empty string")
+    if llm_mode != "none" and not click.get_text_stream("stdin").isatty():
+        raise click.UsageError(
+            "Interactive planner requires a TTY. Use --llm none only for tests."
+        )
+    run_interactive_planner(
+        idea=user_input,
+        project_root=Path(root).resolve(),
+        output_path=Path(output).resolve() if output else None,
+        llm_mode=llm_mode.lower(),
+        backend=backend.lower(),
+        max_slices=max_slices,
+        max_turns=max_turns,
+        max_tool_bytes=max_tool_bytes,
+    )
 
 
 # ---------------------------------------------------------------------------

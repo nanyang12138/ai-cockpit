@@ -1,15 +1,14 @@
 # B.9 — Interactive Planner Mode (contract v0.1)
 
-Status: **contract authored, awaiting user open-gate signal.** This
-document captures the design that was reviewed with the user on
-2026-05-16 after the A2A / Cursor Plan Mode / Claude Code discussion.
-It is a contract for a future implementation, not an implementation
-itself.
+Status: **B.9a open-gated by the user on 2026-05-16 and implemented on
+branch `cursor/b9-interactive-planner-contract-1a13`; B.9b/B.9c/B.9d
+remain gated.** This document captures the design that was reviewed with
+the user on 2026-05-16 after the A2A / Cursor Plan Mode / Claude Code
+discussion.
 
 > This contract adds a human-in-the-loop planning surface to
-> `ai-cockpit`. Until the user explicitly says "open-gate B.9a" (or an
-> equivalent instruction), no source code under `src/` may be modified
-> in service of B.9.
+> `ai-cockpit`. The user explicitly opened B.9a. Later implementation
+> steps still require their own explicit open-gate signal.
 
 ## 1. Why
 
@@ -438,7 +437,8 @@ Because B.9 is additive and write-limited:
 
 ## 17. Authorization rhythm
 
-B.9 is now specified but not open for implementation.
+B.9a is open-gated and implemented as the minimal REPL/protocol shell.
+B.9b and later are not open for implementation.
 
 Allowed now:
 
@@ -446,19 +446,17 @@ Allowed now:
 - discuss or amend the contract;
 - reference it from ROADMAP.
 
-Not allowed until explicit user open-gate:
+Not allowed until the next explicit user open-gate:
 
-- creating `src/ai_cockpit/planner_interactive/*`;
-- modifying `src/ai_cockpit/cli.py` for B.9;
-- adding B.9 tests;
-- wiring Cursor / Claude Code / any external CLI backend.
+- adding B.9b read-only tools;
+- adding B.9c LLM-backed builtin planner behavior;
+- wiring Cursor / Claude Code / any external CLI backend (B.9d).
 
 The implementation gate phrase is:
 
 ```text
-open-gate B.9a
+open-gate B.9b
 ```
 
 Any equivalent instruction from the user is acceptable, but it must be
-explicit. Until then, this file is the source of truth and source code
-remains untouched by B.9.
+explicit.

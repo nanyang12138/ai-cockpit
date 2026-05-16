@@ -348,8 +348,10 @@ per `V0_3_STATUS.md`.
 
 ### B.9 — interactive planner mode
 
-**Status: contract authored 2026-05-16, awaiting user open-gate signal.**
-Full design lives in `docs/B_9_INTERACTIVE_PLANNER_CONTRACT.md`.
+**Status: B.9a open-gated by the user on 2026-05-16 and implemented on
+branch `cursor/b9-interactive-planner-contract-1a13`; B.9b/B.9c/B.9d
+remain gated.** Full design lives in
+`docs/B_9_INTERACTIVE_PLANNER_CONTRACT.md`.
 
 B.9 adds an interactive `ai-cockpit plan "<idea>"` planning surface:
 the user and a planner loop discuss, inspect repository context through
@@ -375,9 +377,10 @@ Key locked decisions:
 | Q6 | New §9 regression: planner conversation and planner tool output must be byte-for-byte absent from reviewer prompt evidence. |
 
 Implementation splits into B.9a / B.9b / B.9c, with optional B.9d for
-Cursor backend. Same ≤8 files / ≤400 net LOC cap applies. Source work is
-NOT authorized until the user explicitly says "open-gate B.9a" (or
-equivalent).
+Cursor backend. Same ≤8 files / ≤400 net LOC cap applies. B.9a is now
+authorized; later source work is NOT authorized until the user
+explicitly says "open-gate B.9b" / "open-gate B.9c" / "open-gate B.9d"
+(or equivalent).
 
 ---
 
