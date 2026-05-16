@@ -174,6 +174,16 @@ ai-cockpit "fix the failing test" --worker aider --apply --llm auto
 > never loaded). If you need both, install aider into a separate
 > virtualenv.
 
+**Aider runtime artifacts are gitignored (A.8).** When aider runs it
+writes `.aider.chat.history.md`, `.aider.input.history`, and a
+`.aider.tags.cache.v4/` directory next to your project. These are
+aider's own session state — chat transcript, input history, and source
+tag cache — not ai-cockpit output, so the repo `.gitignore` excludes
+them (plus a generic `.aider*` glob as a safety net for any future
+filename aider adds). After a `--worker aider --apply` run,
+`git status --short` should not list any `.aider.*` paths; if it does,
+that's a regression in this allow-list, not normal output.
+
 **Pre-run dirty-tree pre-check (A.7).** Before spawning aider, the
 CLI inspects `git status --porcelain` and refuses to proceed if
 there are uncommitted modifications to paths outside the aider

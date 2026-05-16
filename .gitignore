@@ -42,3 +42,13 @@ Thumbs.db
 # / `memory show` / `memory accept`. They are runtime artifacts; only
 # accepted suggestions land under .ai-cockpit/memory/ and get tracked.
 .ai-cockpit/suggestions/
+
+# Aider runtime artifacts (v0.3 step 2 / A.8). These files are written
+# by the `aider` CLI itself when `--worker aider --apply` runs; they are
+# aider's chat/input history and tag cache, NOT ai-cockpit output. The
+# generic `.aider*` glob is the safety net for any future filename aider
+# adds. Documented under README "Coder worker (v0.3 step 2)".
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache.v4/
+.aider*
