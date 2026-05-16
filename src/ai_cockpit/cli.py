@@ -35,6 +35,7 @@ from ai_cockpit.plans import (
     PlanFileError,
     PlanSchemaError,
     check_dependencies,
+    find_plan_markers,
     load_plan,
     plan_path,
 )
@@ -962,6 +963,107 @@ def plans_run_cmd(
         thread_id=thread_id,
         worker_name=worker_name,
     )
+
+
+# ---------------------------------------------------------------------------
+# plans list / plans show (B.6c) — pure read-only walkers over docs/plans/*.
+# No new schema or dependency-check code: B.6c is read-side surface only.
+# ---------------------------------------------------------------------------
+
+
+_PLANS_LARGE_THRESHOLD = 20
+
+
+def _plans_dir(project_root: Path) -> Path:
+    return project_root / "docs" / "plans"
+
+
+def _iter_plan_files(project_root: Path) -> list[Path]:
+    """Return ``docs/plans/*.plan.yaml`` in stable lexicographic order."""
+    plans_dir = _plans_dir(project_root)
+    if not plans_dir.is_dir():
+        return []
+    return sorted(plans_dir.glob("*.plan.yaml"))
+
+
+def _safe_load_plan(path: Path) -> tuple[Plan | None, str | None]:
+    """Best-effort load; surface broken plans as INVALID rows in ``list``."""
+    try:
+        return load_plan(path), None
+    except (PlanFileError, PlanSchemaError) as exc:
+        return None, str(exc)
+
+
+def _next_undone_slice_id(plan: Plan, done: set[str]) -> str:
+    """First slice id whose marker is not yet in git log; '-' if all done."""
+    for plan_slice in plan.slices:
+        if plan_slice.id not in done:
+            return plan_slice.id
+    return "-"
+
+
+@plans_group.command(name="list", help="List plan artifacts under docs/plans/.")
+@click.option(
+    "--root",
+    "root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+    help="Project root containing docs/plans/.",
+)
+def plans_list_cmd(root: str) -> None:
+    """Walk ``docs/plans/*.plan.yaml`` and report progress per plan."""
+    project_root = Path(root).resolve()
+    paths = _iter_plan_files(project_root)
+    if not paths:
+        click.echo("no plans found")
+        return
+    click.echo("plan_id\tcreated_at\ttotal\tdone\tnext")
+    for path in paths:
+        plan, err = _safe_load_plan(path)
+        if plan is None:
+            click.echo(f"{path.stem.removesuffix('.plan')}\t?\t?\t?\tINVALID: {err}")
+            continue
+        done = find_plan_markers(project_root, plan.plan_id)
+        done_in_plan = {s.id for s in plan.slices if s.id in done}
+        total = len(plan.slices)
+        click.echo(
+            f"{plan.plan_id}\t{plan.created_at}\t{total}\t"
+            f"{len(done_in_plan)}\t{_next_undone_slice_id(plan, done_in_plan)}"
+        )
+        if total > _PLANS_LARGE_THRESHOLD:
+            click.echo(
+                f"WARN: plan {plan.plan_id!r} has {total} slices "
+                "(>20); manual audit recommended."
+            )
+
+
+@plans_group.command(
+    name="show",
+    help="Show one plan YAML plus per-slice merged-status from git log.",
+)
+@click.argument("plan_id")
+@click.option(
+    "--root",
+    "root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+    help="Project root containing docs/plans/.",
+)
+def plans_show_cmd(plan_id: str, root: str) -> None:
+    """Print plan YAML and ``[✓|✗] <slice_id>: <title>`` lines."""
+    project_root = Path(root).resolve()
+    path = plan_path(project_root, plan_id)
+    if not path.is_file():
+        raise click.ClickException(f"plan {plan_id!r}: no file at {path}")
+    plan = _resolve_plan_or_die(project_root, plan_id)
+    click.echo(path.read_text(encoding="utf-8").rstrip("\n"))
+    click.echo("---")
+    done = find_plan_markers(project_root, plan.plan_id)
+    for plan_slice in plan.slices:
+        mark = "[✓]" if plan_slice.id in done else "[✗]"
+        click.echo(f"{mark} {plan_slice.id}: {plan_slice.title}")
 
 
 if __name__ == "__main__":

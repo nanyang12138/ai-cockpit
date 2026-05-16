@@ -303,7 +303,7 @@ user, not cron, because it sets the bar for declaring v0.4 done.
 
 ### B.6 — multi-step planner & plan artifact
 
-**Status: contract authored 2026-05-16, awaiting user open-gate signal.**
+**Status: delivered 2026-05-16 (B.6a + B.6b + B.6c merged to master).**
 Full design lives in `docs/B_6_CONTRACT.md` (audit-trail-grade,
 ~340 lines). The summary:
 
@@ -343,6 +343,17 @@ Even the contract-PR itself was opened only because the user pre-
 authorized writing the contract during the 2026-05-16 design
 conversation. Section B as a whole still requires fresh user direction
 per `V0_3_STATUS.md`.
+
+**Delivery note (2026-05-16):** all three B.6 PRs landed this day
+under the user-authorized Section-B cron window. B.6a (PR #49,
+`b8b790c`) shipped the schema + atomic loader; B.6b (PR #50,
+`da7ea1f`) shipped `plans run` + git-log dep check + anti-deception
+test #5; B.6c shipped `plans list` / `plans show` + this status
+update + the spec §9 addendum that pins "plans are scheduling
+artifacts, not reviewer-prompt evidence" byte-for-byte. Q5's
+two-key authorization for executing a real `plans run` tick
+remains binding and is still satisfied only when the user (or
+cron-self) names `active_plan_id` in `V0_3_STATUS.md`.
 
 ### (B.7 and B.8 promoted to Section A — see A.7 / A.8 above.)
 
