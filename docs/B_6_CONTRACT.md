@@ -12,6 +12,14 @@ or human) has an unambiguous specification to work from.
 > three implementation PRs (B.6a / B.6b / B.6c). Until then, no
 > source code under `src/` may be modified in service of B.6.
 
+2026-05-16 addendum: `docs/B_9_INTERACTIVE_PLANNER_CONTRACT.md`
+supersedes this document's original one-shot `ai-cockpit plan`
+generation design in §5.1. B.6 remains the source of truth for the
+plan artifact schema, `plans run`, `plans list`, `plans show`, and
+dependency markers. If B.9 is open-gated first, B.6 implementation
+must reuse B.9's interactive `plan` surface instead of adding a second
+non-interactive planner command.
+
 ## 1. Why
 
 Today `ai-cockpit run` consumes exactly one user idea per invocation
@@ -101,6 +109,13 @@ slices:                        # 1..n entries (no schema upper bound)
 ## 5. CLI surface (three commands; none touch source by themselves except `plans run`)
 
 ### 5.1 `ai-cockpit plan` — generate a plan; never execute
+
+**Superseded by B.9 if B.9 is open-gated.** The original B.6 design
+below described a one-shot non-interactive planner. The 2026-05-16
+Cursor Plan Mode discussion changed the product decision: real
+planning should be interactive and human-approved. Implementers should
+read `docs/B_9_INTERACTIVE_PLANNER_CONTRACT.md` before touching this
+command.
 
 ```
 ai-cockpit plan "<complex goal>" \

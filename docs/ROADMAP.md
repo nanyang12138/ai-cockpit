@@ -307,6 +307,11 @@ user, not cron, because it sets the bar for declaring v0.4 done.
 Full design lives in `docs/B_6_CONTRACT.md` (audit-trail-grade,
 ~340 lines). The summary:
 
+2026-05-16 addendum: B.9's interactive planner contract supersedes the
+original one-shot `ai-cockpit plan` generation path in B.6 §5.1. B.6
+still owns the plan artifact schema, `plans run`, `plans list/show`,
+and dependency-marker execution semantics.
+
 Today the planner produces one `implementation_slice` and `ai-cockpit
 run` consumes exactly one idea. Complex tasks have to be hand-
 decomposed by the operator before they can enter the pipeline. B.6
@@ -340,6 +345,39 @@ conversation. Section B as a whole still requires fresh user direction
 per `V0_3_STATUS.md`.
 
 ### (B.7 and B.8 promoted to Section A — see A.7 / A.8 above.)
+
+### B.9 — interactive planner mode
+
+**Status: contract authored 2026-05-16, awaiting user open-gate signal.**
+Full design lives in `docs/B_9_INTERACTIVE_PLANNER_CONTRACT.md`.
+
+B.9 adds an interactive `ai-cockpit plan "<idea>"` planning surface:
+the user and a planner loop discuss, inspect repository context through
+read-only tools, revise draft slices, and write a B.6-compatible
+`docs/plans/<plan_id>.plan.yaml` only after the user explicitly runs
+`/save`.
+
+This is the contract-level correction from the Cursor Plan Mode
+discussion: planning is human-in-the-loop and iterative; execution is
+the later non-interactive `plans run` path. Cursor / Claude Code may be
+optional planner backends later, but the builtin backend is required and
+default so `ai-cockpit` does not depend on a closed-source CLI.
+
+Key locked decisions:
+
+| # | Decision |
+| --- | --- |
+| Q1 | `ai-cockpit plan` is an interactive foreground CLI REPL, not a daemon, UI, or non-interactive autonomous planner. |
+| Q2 | `stdin.isatty()` is required for real planning; non-TTY mode is only allowed for deterministic `--llm none` tests. |
+| Q3 | Builtin backend ships first and uses the existing `LLMProvider` plus read-only tools (`read_file`, `glob`, `ripgrep`, `git_status`, `git_log`, `read_existing_plans`). |
+| Q4 | Cursor backend is optional/deferred; the user's three CLI experiments showed `agent --print` returns first-turn progress, not reliable completed plan artifacts. |
+| Q5 | `/save` is the only write path and writes only `docs/plans/*.plan.yaml`; no source edits, no memory writes, no coder invocation. |
+| Q6 | New §9 regression: planner conversation and planner tool output must be byte-for-byte absent from reviewer prompt evidence. |
+
+Implementation splits into B.9a / B.9b / B.9c, with optional B.9d for
+Cursor backend. Same ≤8 files / ≤400 net LOC cap applies. Source work is
+NOT authorized until the user explicitly says "open-gate B.9a" (or
+equivalent).
 
 ---
 
