@@ -202,3 +202,113 @@ def test_cli_explicit_workflow_path_override(
     )
     assert r.exit_code == 0, r.output
     assert (captured["mode"], captured["max_loops"]) == ("task", 2)
+
+
+# --- A.4: `workflows list` / `workflows validate` subcommands ---------------
+
+
+def test_workflows_list_on_repo_yamls() -> None:
+    """`workflows list --root <repo>` should enumerate the two repo YAMLs."""
+    repo_root = Path(__file__).resolve().parents[1]
+    r = CliRunner().invoke(
+        cli_main,
+        ["workflows", "list", "--root", str(repo_root)],
+        catch_exceptions=False,
+    )
+    assert r.exit_code == 0, r.output
+    lines = r.output.strip().splitlines()
+    assert lines[0] == "name\tmode\tmax_loops\ttest_commands_count"
+    body = "\n".join(lines[1:])
+    assert "idea-to-mvp\texploration\t1\t0" in body
+    bug_fix_line = next(line for line in lines[1:] if line.startswith("bug-fix\t"))
+    parts = bug_fix_line.split("\t")
+    assert parts[1] == "task"
+    assert int(parts[2]) >= 2
+    assert int(parts[3]) >= 1
+
+
+def test_workflows_list_no_dir_prints_marker(tmp_path: Path) -> None:
+    r = CliRunner().invoke(
+        cli_main,
+        ["workflows", "list", "--root", str(tmp_path)],
+        catch_exceptions=False,
+    )
+    assert r.exit_code == 0, r.output
+    assert r.output.strip() == "no workflows found"
+
+
+def test_workflows_list_reports_invalid_yaml_inline(tmp_path: Path) -> None:
+    """Invalid YAMLs surface as a per-row INVALID marker, not a hard error."""
+    wf_dir = tmp_path / ".ai-cockpit" / "workflows"
+    wf_dir.mkdir(parents=True)
+    good = wf_dir / "good.yaml"
+    good.write_text(
+        "name: good\nmode: exploration\nmax_loops: 1\n"
+        f"nodes: {list(CANONICAL_NODE_ORDER)}\n"
+    )
+    bad = wf_dir / "bad.yaml"
+    bad.write_text("name: bad\nmode: swarm\nmax_loops: 1\n"
+                   f"nodes: {list(CANONICAL_NODE_ORDER)}\n")
+    r = CliRunner().invoke(
+        cli_main,
+        ["workflows", "list", "--root", str(tmp_path)],
+        catch_exceptions=False,
+    )
+    assert r.exit_code == 0, r.output
+    out = r.output
+    assert "good\texploration\t1\t0" in out
+    bad_line = next(line for line in out.splitlines() if line.startswith("bad\t"))
+    assert "INVALID" in bad_line and "mode must be one of" in bad_line
+
+
+def test_workflows_validate_ok_on_repo_yamls() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    for fname in ("idea-to-mvp.yaml", "bug-fix.yaml"):
+        path = repo_root / ".ai-cockpit" / "workflows" / fname
+        r = CliRunner().invoke(
+            cli_main,
+            ["workflows", "validate", str(path)],
+            catch_exceptions=False,
+        )
+        assert r.exit_code == 0, r.output
+        assert r.output.strip() == "OK"
+
+
+def test_workflows_validate_surfaces_workflow_error(tmp_path: Path) -> None:
+    bad = tmp_path / "bad.yaml"
+    bad.write_text(
+        "name: bad\nmode: exploration\nmax_loops: 1\n"
+        "nodes: [intake, planner, rogue, coder, verifier, reviewer, decision, summary]\n"
+    )
+    r = CliRunner().invoke(
+        cli_main,
+        ["workflows", "validate", str(bad)],
+        catch_exceptions=False,
+    )
+    assert r.exit_code != 0
+    assert "out of sync" in r.output
+
+
+def test_workflows_validate_missing_file_is_usage_error(tmp_path: Path) -> None:
+    missing = tmp_path / "nope.yaml"
+    r = CliRunner().invoke(
+        cli_main,
+        ["workflows", "validate", str(missing)],
+        catch_exceptions=False,
+    )
+    assert r.exit_code != 0
+
+
+def test_default_group_does_not_route_workflows_to_run(
+    repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`ai-cockpit workflows ...` must NOT be silently rewritten to `run workflows ...`."""
+    called: dict[str, object] = {}
+    monkeypatch.setattr("ai_cockpit.cli.run_graph", lambda **kw: called.update(kw))
+    r = CliRunner().invoke(
+        cli_main,
+        ["workflows", "list", "--root", str(repo)],
+        catch_exceptions=False,
+    )
+    assert r.exit_code == 0, r.output
+    assert called == {}, "run_graph should not have been invoked"
