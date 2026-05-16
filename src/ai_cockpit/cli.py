@@ -18,7 +18,7 @@ from pathlib import Path
 import click
 
 from ai_cockpit.checkpoint import new_thread_id, resolve_checkpoint_db
-from ai_cockpit.graph import run_graph
+from ai_cockpit.graph import run_graph, slice_to_user_input
 from ai_cockpit.llm import build_llm
 from ai_cockpit.memory.suggestions import (
     Suggestion,
@@ -29,6 +29,15 @@ from ai_cockpit.memory.suggestions import (
     load_suggestion,
 )
 from ai_cockpit.planner_interactive import run_interactive_planner
+from ai_cockpit.plans import (
+    DependencyError,
+    Plan,
+    PlanFileError,
+    PlanSchemaError,
+    check_dependencies,
+    load_plan,
+    plan_path,
+)
 from ai_cockpit.tools.git import is_git_repo
 from ai_cockpit.tools.shell import run_command
 from ai_cockpit.workflow import (
@@ -852,6 +861,107 @@ def workflows_validate_cmd(path: str) -> None:
     except WorkflowError as exc:
         raise click.ClickException(str(exc)) from exc
     click.echo("OK")
+
+
+# ---------------------------------------------------------------------------
+# plans subgroup (B.6b) — execute one slice of an existing plan artifact.
+# ---------------------------------------------------------------------------
+
+
+@main.group(name="plans", help="Execute slices of plan artifacts under docs/plans/.")
+def plans_group() -> None:
+    """B.6 plan-execution subcommands. ``plan`` (singular) builds plans."""
+
+
+def _resolve_plan_or_die(project_root: Path, plan_id: str) -> Plan:
+    path = plan_path(project_root, plan_id)
+    try:
+        return load_plan(path)
+    except PlanFileError as exc:
+        raise click.ClickException(str(exc)) from exc
+    except PlanSchemaError as exc:
+        raise click.ClickException(
+            f"plan {plan_id!r} at {path} fails schema validation: {exc}"
+        ) from exc
+
+
+@plans_group.command(
+    name="run",
+    help="Execute one slice (refuses if a depends_on marker is missing).",
+)
+@click.argument("plan_id")
+@click.argument("slice_id")
+@click.option("--root", "root", default=".", show_default=True,
+              type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True))
+@click.option("--worker", "worker_name", default="stub", show_default=True,
+              type=click.Choice(["stub", "aider"], case_sensitive=False))
+@click.option("--apply", "apply", is_flag=True, default=False,
+              help="With --worker aider, opt in to letting aider edit files.")
+@click.option("--llm", "llm_mode", default="none", show_default=True,
+              type=click.Choice(["none", "auto", "anthropic", "openai"],
+                                case_sensitive=False))
+@click.option("--max-loops", "max_loops", default=1, show_default=True,
+              type=click.IntRange(min=0, max=10))
+@click.option("--no-checkpoint", "no_checkpoint", is_flag=True, default=False)
+@click.option("--dry-run", "dry_run", is_flag=True, default=False)
+def plans_run_cmd(
+    plan_id: str,
+    slice_id: str,
+    root: str,
+    worker_name: str,
+    apply: bool,
+    llm_mode: str,
+    max_loops: int,
+    no_checkpoint: bool,
+    dry_run: bool,
+) -> None:
+    project_root = Path(root).resolve()
+    plan = _resolve_plan_or_die(project_root, plan_id)
+    slice_obj = next((s for s in plan.slices if s.id == slice_id), None)
+    if slice_obj is None:
+        raise click.ClickException(
+            f"plan {plan_id!r}: no slice with id {slice_id!r}"
+        )
+    try:
+        check_dependencies(project_root, plan_id, slice_obj.depends_on)
+    except DependencyError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    worker_name = (worker_name or "stub").lower()
+    if apply and worker_name != "aider":
+        raise click.UsageError("--apply is only meaningful with --worker aider")
+    if apply and dry_run:
+        raise click.UsageError("--apply and --dry-run are mutually exclusive")
+    effective_dry_run = dry_run or (worker_name == "aider" and not apply)
+    if worker_name == "aider" and apply:
+        _enforce_dirty_tree_precheck(str(project_root))
+
+    llm = build_llm(llm_mode)
+    if llm_mode != "none" and llm is None:
+        click.echo("warning: --llm unavailable; falling back to stubs.", err=True)
+    elif llm is not None:
+        click.echo(f"info: LLM enabled ({llm.name})", err=True)
+
+    thread_id = None if no_checkpoint else new_thread_id()
+    if thread_id is not None:
+        click.echo(f"info: checkpoint thread id: {thread_id}", err=True)
+    click.echo(
+        f"info: running slice {plan_id}/{slice_id} "
+        f"(files_budget={slice_obj.files_budget}, "
+        f"loc_budget={slice_obj.loc_budget})",
+        err=True,
+    )
+    run_graph(
+        user_input=slice_to_user_input(plan, slice_obj),
+        project_root=str(project_root),
+        mode="task",
+        max_loops=max_loops,
+        test_commands=list(slice_obj.test_commands),
+        dry_run=effective_dry_run,
+        llm=llm,
+        thread_id=thread_id,
+        worker_name=worker_name,
+    )
 
 
 if __name__ == "__main__":
