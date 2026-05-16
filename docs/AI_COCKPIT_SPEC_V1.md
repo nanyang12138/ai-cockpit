@@ -427,6 +427,31 @@ Reviewer 必须基于事实：
 - 循环次数有限
 - 关键产品判断交给人
 
+### 9.1 多步 plan 是调度产物，不是 reviewer 证据（B.6 addendum, 2026-05-16）
+
+B.6 引入了 `docs/plans/<plan_id>.plan.yaml` 多步 plan 工件以及
+`ai-cockpit plans run <plan_id> <slice_id>` 执行入口。该工件**只是
+调度层 metadata**：它告诉系统下一步要跑哪个 slice，以及 slice 之间
+的依赖应通过 git log 中的 `[<plan_id>/<slice_id>]` marker 验证。
+它**不是** reviewer 的正向证据来源。
+
+因此在 §9 evidence-only reviewer 这条硬规则之下，B.6 必须同时满足：
+
+- plan YAML 的 `idea` / `why` / `scope_must` / `acceptance_criteria`
+  等任何字段**不得**字节级地出现在 reviewer prompt（已由 anti-
+  deception 回归测试 #5 在 `tests/test_llm_planner_reviewer.py`
+  中钉死）。
+- `plans run` 在把 slice 的 `title / why / scope_must / scope_out
+  / dod / test_commands` 注入 `TaskState` 时，它们走的是和"人输入
+  一个 idea"完全相同的通道；plan 的整体 `idea` 字段仅作为背景
+  context 附带，不进入 acceptance criteria。
+- 依赖检查的真值来源**只**是 `git log` 中的 marker；任何 in-process
+  缓存、plan 文件自身的"已完成"标记、或 reviewer 的自报，都不构成
+  授权。
+- `plans list` / `plans show` 是纯只读视图，仅汇总 `docs/plans/*`
+  以及 `git log` 中的 marker；它们不修改任何源、不写 memory、不
+  调 LLM、也不进入 reviewer prompt。
+
 ## 10. 最小可行架构
 
 v0.1 不应该做完整 OS。
