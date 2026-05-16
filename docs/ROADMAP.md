@@ -180,6 +180,48 @@ open a separate bug PR — do not silently fix it as part of this step.
 
 **Files touched:** ≤ 1 (test file only). ≤ 200 net LOC.
 
+### A.7 — pre-run dirty-tree pre-check (surfaced by A.1 milestone)
+
+Originally B.7 — promoted into the cron-safe queue by the 2026-05-16
+24h-autonomous authorization (see `V0_3_STATUS.md`). Self-contained
+CLI change, mock-friendly tests, no LLM dependency.
+
+**Scope (must):** before any `--worker aider --apply` invocation,
+inspect `git status --porcelain` on `--root`:
+
+- If there are uncommitted modifications to files NOT inside the
+  aider runtime allow-list (`.aider.*`, `.ai-cockpit/suggestions/`,
+  `.ai-cockpit/history/`), print a warning listing each path and a
+  one-line `git checkout -- <file>` hint.
+- Refuse to proceed unless `--allow-dirty-tree` is passed.
+- `--worker stub` / `--llm none` / dry-run paths are unaffected.
+
+**Out of scope:** no diff inspection. No three-way merge. No
+attempt to auto-revert. Just block + report.
+
+**DoD:** tests that simulate dirty-tree via tmp_path git repos and
+assert refusal vs `--allow-dirty-tree` succeeds.
+
+**Files touched:** ≤ 3 (cli.py + tests + README). ≤ 200 net LOC.
+
+### A.8 — gitignore `.aider.*` runtime artifacts
+
+Originally B.8 — promoted into the cron-safe queue by the
+2026-05-16 24h authorization. Trivial.
+
+**Scope (must):** add `.aider.chat.history.md`, `.aider.input.history`,
+`.aider.tags.cache.v4/`, and the generic `.aider*` glob to the repo
+`.gitignore`. Document in README under "Coder worker (v0.3 step 2)"
+why these are aider's runtime side-artifacts, not ai-cockpit output.
+
+**Out of scope:** no AiderWorker change. No auto-cleanup at run time
+(future improvement, separate step).
+
+**DoD:** after the next AiderWorker run, `git status --short` does
+not list `.aider.*` paths. Existing tests still green.
+
+**Files touched:** ≤ 2 (.gitignore + README). ≤ 20 net LOC.
+
 ### A.6 — `docs/ARCHITECTURE.md`
 
 **Why:** future contributors (including a future cron-self) need a
@@ -266,41 +308,7 @@ let one user idea decompose into a small sequence of slices, each
 executed independently with verification between. Major design
 change — defer.
 
-### B.7 — pre-run dirty-tree pre-check  (surfaced by A.1 milestone)
-
-The 2026-05-16 A.1 milestone (`docs/V0_3_MILESTONES.md`) hit
-`decision: ask_human` for an entirely unrelated reason: the working
-tree had a leftover modification to `examples/broken_calc/calc.py`
-from the previous day's §15.1 demo that the human had forgotten to
-reset. ai-cockpit's output itself was correct, but the verifier's
-pytest run failed on the unrelated demo-guard test, and the
-reviewer correctly (and helplessly) flagged the unrelated state.
-
-**Scope (must):** before any non-dry-run invocation that has
-`--worker aider --apply`, the CLI should:
-
-1. Inspect `git status --porcelain` on `--root`.
-2. If there are modifications to files NOT mentioned in the
-   planner's `implementation_slice` (or, conservatively, ANY
-   modifications), print a warning and a one-line
-   `git checkout -- <file>` hint.
-3. Refuse to proceed unless a new `--allow-dirty-tree` flag is set,
-   OR the dirty files are inside the aider runtime-artifact
-   allow-list (`.aider.*`, `.ai-cockpit/suggestions/`).
-
-This is small (~50 net LOC, one file plus tests) and would
-eliminate the most common `ask_human` cause we observed across
-two real-LLM sessions.
-
-### B.8 — gitignore `.aider.*` runtime artifacts
-
-Same session: aider leaves `.aider.chat.history.md`,
-`.aider.input.history`, `.aider.tags.cache.v4/` in the repo root
-after each invocation. PR #24 already added `--no-gitignore` to
-keep aider from modifying the user's `.gitignore`; this item
-inverts that: it's our gitignore policy decision, not aider's.
-Either gitignore these patterns or have AiderWorker clean them
-up post-run. Trivial (~5 LOC).
+### (B.7 and B.8 promoted to Section A — see A.7 / A.8 above.)
 
 ---
 
