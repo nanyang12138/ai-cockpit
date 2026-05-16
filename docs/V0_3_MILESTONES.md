@@ -181,3 +181,90 @@ worth noting in case v0.4 takes on planner-prompt-side hardening
 - Operating contract: `V0_3_STATUS.md` (cron memory) was authorized
   by the user on 2026-05-15 to walk Section A; A.1 was item one of
   that queue.
+
+## 2026-05-16 — B.6 multi-step planner contract authored (no code yet)
+
+**Headline:** the design contract for the largest unshipped v0.3
+backlog item — multi-step planning (`docs/ROADMAP.md` B.6) — was
+authored in an interactive design conversation with the user and
+checked in to `docs/B_6_CONTRACT.md`. No source code under `src/` was
+modified; cron is **not** authorized to begin implementation until the
+user explicitly signals "open-gate B.6a".
+
+This milestone is logged here rather than under v0.4 because it
+captures the **process** by which v0.3-the-project graduates from
+single-slice runs to plan-driven execution. The contract itself does
+not change runtime behavior; the open-gate signal is what flips B.6
+from "deferred" into "in flight".
+
+### Why this is a milestone
+
+Three reasons it's worth a permanent record:
+
+1. **It's the first time the cron / agent contract was negotiated
+   end-to-end with the user before any code landed.** Earlier work
+   (PRs #3–#34) followed pre-existing contracts in `V0_2_PLAN.md` or
+   `docs/ROADMAP.md` Section A. B.6 required the operating layer to
+   produce a fresh, accurate, safe spec instead of guessing — and
+   then prove (in conversation) that each design choice survived
+   user scrutiny.
+2. **It locks down the architectural shape of "complex task" support
+   for v0.4 and beyond.** B.6 is the load-bearing decision for whether
+   ai-cockpit ever takes a complex goal as a single CLI invocation.
+   Getting it wrong now would constrain v0.4. Getting it right (as
+   reviewed in the conversation) keeps spec §9 and §12 invariants
+   intact even when execution grows multi-slice.
+3. **It deliberately did NOT borrow swarm / multi-agent / debate
+   patterns** despite those being the obvious "more agents = more
+   power" temptation. The contract is grounded in the 2025–2026
+   multi-agent retrospective literature (Cognition "Don't Build
+   Multi-Agents", Anthropic research-system writeup, NeurIPS 2025
+   MAST taxonomy, Magentic-One Task Ledger). The single-threaded
+   writer + evidence-gated reviewer + persisted task ledger
+   structure is the convergent best practice.
+
+### Six design questions and how each one was decided
+
+Each Q was raised by the contract draft, debated with the user, and
+resolved with rationale captured both here and in
+`docs/B_6_CONTRACT.md` §3.
+
+| # | Resolution | Note |
+|---|---|---|
+| Q1 — file format | `.plan.yaml` with markdown `\|` multi-line content blocks | YAML for schema safety; markdown blocks preserve human readability. |
+| Q2 — CLI shape | New `ai-cockpit plans run <plan_id> <slice_id>` subcommand under the `plans` group; `run` left unmodified | The user explicitly preferred reducing flag-overload on `run`; the cleanest path turned out to be a dedicated subcommand mirroring the existing `memory list/show/accept` group. |
+| Q3 — slice count cap | None at schema level | User pushed back on my initial recommendation of 20. Their argument: operational/cognitive risks aren't safety risks. Schema invariants (per-slice budget, scope_out non-empty) are sufficient. |
+| Q4 — `--max-slices` default | Flag kept, **default unbounded** | User noticed the inconsistency between "no schema cap" and "default cap of 10" and corrected me. Flag still exists for deliberate use. |
+| Q5 — cron authorization for B.6 execution | Two keys: plan merged + `V0_3_STATUS.md` lists `active_plan_id` | Plan-merge proves PR review; status pointer proves operator intent. Status file is not LLM-written, defeating self-authorization via jailbroken plan. |
+| Q6 — per-call cost cap on `plan` | Dropped | User pointed out that v0.2/v0.3 don't cap planner/reviewer costs anywhere else; adding it only for `plan` would be inconsistent with the project's posture. Cost stays a user-account concern. |
+
+### Honest framing — what this milestone does NOT establish
+
+- **No source code change** lives in this commit chain. `src/` is
+  unmodified. The next cron tick still implements `docs/ROADMAP.md`
+  Section A items (A.3 → A.8), not B.6.
+- **The contract has not been validated by real implementation.**
+  Any of the file budgets in `docs/B_6_CONTRACT.md` §6 may turn out
+  to be wrong once a slice is actually being written. The contract
+  is the best estimate given v0.2/v0.3 step experience; that's not
+  the same as evidence.
+- **The two-key authorization model has not been load-tested.** Until
+  cron has run at least one B.6 plan against this rule, we cannot
+  claim it actually prevents misfire. The §15.1-style end-to-end
+  demo is part of B.6's DoD specifically to close this gap.
+- **B.6 does not, on its own, deliver "complex task → finished
+  product".** It delivers "complex task → reviewable plan + per-
+  slice execution gates". The human (or eventually the cron, post-
+  open-gate) still has to march through the slices. The improvement
+  is that the decomposition is now first-class instead of off-book.
+
+### Cross-links
+
+- Full contract: `docs/B_6_CONTRACT.md`.
+- ROADMAP entry (now contract-aware): `docs/ROADMAP.md` Section B.6.
+- Multi-agent research underlying the design choices: the 2026-05-16
+  research summary delivered to the user in this conversation
+  (Cognition's "Don't Build Multi-Agents", Anthropic's "How We Built
+  Our Multi-Agent Research System", Microsoft Magentic-One Task
+  Ledger paper, MAST NeurIPS 2025, "From Spark to Fire" 2026 paper
+  on cascading errors in multi-agent collaboration).
