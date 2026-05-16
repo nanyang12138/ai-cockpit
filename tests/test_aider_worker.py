@@ -359,6 +359,114 @@ def test_cli_apply_conflicts_with_dry_run(tmp_path) -> None:
     assert "--apply and --dry-run are mutually exclusive" in result.output
 
 
+# A.3 — token / cost extraction from aider stdout
+
+_CANONICAL_AIDER_STDOUT = (
+    "Applied edit to calc.py\n"
+    "Tokens: 6.7k sent, 316 received.\n"
+    "Cost: $0.04 message, $0.04 session.\n"
+)
+
+
+@pytest.mark.parametrize(
+    "stdout,expected",
+    [
+        pytest.param(
+            _CANONICAL_AIDER_STDOUT,
+            {
+                "tokens_sent": 6700.0,
+                "tokens_received": 316.0,
+                "cost_message_usd": 0.04,
+                "cost_session_usd": 0.04,
+            },
+            id="canonical-pr28-format",
+        ),
+        pytest.param(
+            "Tokens: 1.2k sent, 100 received.\n"
+            "Cost: $0.01 message, $0.01 session.\n"
+            "Tokens: 3.4k sent, 250 received.\n"
+            "Cost: $0.02 message, $0.03 session.\n",
+            {
+                "tokens_sent": 3400.0,
+                "tokens_received": 250.0,
+                "cost_message_usd": 0.02,
+                "cost_session_usd": 0.03,
+            },
+            id="multi-turn-last-wins",
+        ),
+        pytest.param(
+            "Tokens: 999 sent, 42 received.\nCost: $0.001 message, $0.001 session.\n",
+            {
+                "tokens_sent": 999.0,
+                "tokens_received": 42.0,
+                "cost_message_usd": 0.001,
+                "cost_session_usd": 0.001,
+            },
+            id="plain-integer-tokens",
+        ),
+        pytest.param(
+            "Tokens: 1.5m sent, 12.3k received.\n"
+            "Cost: $12.34 message, $99.01 session.\n",
+            {
+                "tokens_sent": 1_500_000.0,
+                "tokens_received": 12_300.0,
+                "cost_message_usd": 12.34,
+                "cost_session_usd": 99.01,
+            },
+            id="mega-units",
+        ),
+        pytest.param(
+            "Tokens: 2.0k sent, 50 received.\nDone.\n",
+            {"tokens_sent": 2000.0, "tokens_received": 50.0},
+            id="tokens-only-no-cost",
+        ),
+        pytest.param(
+            "Cost: $0.10 message, $0.50 session.\nDone.\n",
+            {"cost_message_usd": 0.10, "cost_session_usd": 0.50},
+            id="cost-only-no-tokens",
+        ),
+    ],
+)
+def test_metrics_extracted_from_aider_stdout(
+    stdout: str, expected: dict[str, float]
+) -> None:
+    runner = _FakeRunner(stdout=stdout)
+    worker = AiderWorker(subprocess_runner=runner)
+    result = worker.run(_req())
+    assert result.metrics == expected
+
+
+@pytest.mark.parametrize(
+    "stdout",
+    [
+        pytest.param("", id="empty-stdout"),
+        pytest.param("Applied edit to calc.py\nDone.\n", id="no-tokens-no-cost"),
+        pytest.param(
+            "Tokens: ??? sent, ??? received.\nCost: $?? message, $?? session.\n",
+            id="garbage-non-numeric",
+        ),
+        pytest.param(
+            "Tokens 6.7k sent 316 received\nCost 0.04 message 0.04 session\n",
+            id="missing-colons-and-dollar-signs",
+        ),
+    ],
+)
+def test_metrics_silent_on_missing_or_malformed_stdout(stdout: str) -> None:
+    runner = _FakeRunner(stdout=stdout)
+    worker = AiderWorker(subprocess_runner=runner)
+    assert worker.run(_req()).metrics == {}
+
+
+def test_metrics_default_empty_for_dry_run_and_stub() -> None:
+    """Neither dry-run nor StubWorker has anything to report."""
+
+    from ai_cockpit.workers import StubWorker
+
+    runner = _FakeRunner(stdout=_CANONICAL_AIDER_STDOUT)
+    assert AiderWorker(subprocess_runner=runner).run(_req(dry_run=True)).metrics == {}
+    assert StubWorker().run(_req()).metrics == {}
+
+
 def test_cli_aider_preview_only_does_not_invoke_subprocess(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
