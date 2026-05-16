@@ -23,9 +23,15 @@ def _select_worker(worker_name: str) -> Worker:
     name = (worker_name or "stub").strip().lower()
     if name == "aider":
         return AiderWorker()
+    if name == "cursor":
+        from ai_cockpit.cursor_adapter.worker import CursorWorker
+
+        return CursorWorker()
     if name == "stub":
         return StubWorker()
-    raise ValueError(f"unknown worker: {worker_name!r} (expected 'stub' or 'aider')")
+    raise ValueError(
+        f"unknown worker: {worker_name!r} (expected 'stub', 'aider', or 'cursor')"
+    )
 
 
 def make_coder_node(worker_name: str = "stub") -> Callable[[TaskState], TaskState]:
