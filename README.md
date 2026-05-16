@@ -64,6 +64,7 @@ Optional flags:
 | `--dry-run` | off | Skip running the test command(s); still collect git status/diff. |
 | `--worker MODE` | `stub` | `stub` (default) never modifies files. `aider` spawns the `aider` CLI to execute the implementation slice; requires `--apply` to actually edit (preview-only otherwise). |
 | `--apply` | off | Opt-in for `--worker aider`: actually invoke aider so it can modify files. Mutually exclusive with `--dry-run`. Ignored for `--worker stub`. |
+| `--allow-dirty-tree` | off | Bypass the A.7 pre-run dirty-tree pre-check. By default `--worker aider --apply` refuses to start when uncommitted changes exist outside the aider runtime allow-list (`.aider.*`, `.ai-cockpit/suggestions/`, `.ai-cockpit/history/`). |
 | `--llm MODE` | `none` | `none` keeps stub planner/reviewer (default). `auto` picks Anthropic vs OpenAI from env. `anthropic` / `openai` force a provider. |
 | `--thread-id ID` | auto-minted | Explicit thread id under which this run is persisted. When omitted, a fresh id is generated and printed to stderr. |
 | `--resume` | off | Boolean flag. Resume the run identified by `--thread-id` from its last checkpoint. Requires `--thread-id`; the idea argument is ignored. |
@@ -172,6 +173,18 @@ ai-cockpit "fix the failing test" --worker aider --apply --llm auto
 > against an Anthropic-compatible endpoint (the OpenAI client is
 > never loaded). If you need both, install aider into a separate
 > virtualenv.
+
+**Pre-run dirty-tree pre-check (A.7).** Before spawning aider, the
+CLI inspects `git status --porcelain` and refuses to proceed if
+there are uncommitted modifications to paths outside the aider
+runtime allow-list (`.aider.*`, `.ai-cockpit/suggestions/`,
+`.ai-cockpit/history/`). The error message lists each blocking
+path with a one-line `git checkout -- <file>` hint so you can
+either commit, stash, or revert before retrying. To deliberately
+let aider edit on top of a dirty tree, pass `--allow-dirty-tree`.
+This guard only fires for `--worker aider --apply`; preview-only
+runs (`--worker aider` without `--apply`) and stub runs are
+unaffected.
 
 ### Workflow YAMLs (v0.2 step 4 + v0.3 micro-step #2)
 

@@ -28,6 +28,8 @@ from ai_cockpit.memory.suggestions import (
     list_suggestions,
     load_suggestion,
 )
+from ai_cockpit.tools.git import is_git_repo
+from ai_cockpit.tools.shell import run_command
 from ai_cockpit.workflow import (
     Workflow,
     WorkflowError,
@@ -79,6 +81,72 @@ class _DefaultGroup(click.Group):
 )
 def main() -> None:  # noqa: D401 - click group docstring is in the decorator
     """Group entry point — actual work happens in subcommands."""
+
+
+# A.7: paths matching any of these prefixes are aider/ai-cockpit runtime
+# side-effects, not user work, so a dirty entry pointing at one of them
+# never blocks `--worker aider --apply`. Keep in sync with `docs/ROADMAP.md`
+# §A.7 and the A.8 .gitignore additions.
+_AIDER_RUNTIME_ALLOWLIST_PREFIXES: tuple[str, ...] = (
+    ".aider.",
+    ".aider/",
+    ".ai-cockpit/suggestions/",
+    ".ai-cockpit/history/",
+)
+
+
+def _dirty_paths_outside_aider_allowlist(project_root: str) -> list[str]:
+    """Return uncommitted-modification paths that are NOT aider runtime artifacts.
+
+    ``--untracked-files=all`` matters: without it git collapses untracked
+    dirs into a single entry (e.g. ``.ai-cockpit/``) that defeats per-file
+    prefix matching for a legitimate ``.ai-cockpit/suggestions/foo.json``.
+    Returns ``[]`` on non-git roots or git failure — best-effort, not a
+    hard gate.
+    """
+    if not is_git_repo(project_root):
+        return []
+    result = run_command(
+        "git status --porcelain --untracked-files=all", cwd=project_root
+    )
+    if result["exit_code"] != 0:
+        return []
+    paths: list[str] = []
+    for raw_line in result["stdout"].splitlines():
+        if len(raw_line) < 4:
+            continue
+        rest = raw_line[3:]
+        if " -> " in rest:
+            rest = rest.split(" -> ", 1)[1]
+        path = rest.strip()
+        if path and not any(
+            path.startswith(p) for p in _AIDER_RUNTIME_ALLOWLIST_PREFIXES
+        ):
+            paths.append(path)
+    return paths
+
+
+def _enforce_dirty_tree_precheck(project_root: str) -> None:
+    """A.7: refuse ``--worker aider --apply`` on a dirty working tree."""
+    dirty = _dirty_paths_outside_aider_allowlist(project_root)
+    if not dirty:
+        return
+    click.echo(
+        "error: refusing --worker aider --apply on a dirty working tree. "
+        "The following uncommitted paths are not aider runtime artifacts:",
+        err=True,
+    )
+    for path in dirty:
+        click.echo(f"  {path}    (revert with: git checkout -- {path})", err=True)
+    click.echo(
+        "Commit, stash, or revert these paths before re-running, or pass "
+        "--allow-dirty-tree to bypass this guard at your own risk.",
+        err=True,
+    )
+    raise click.UsageError(
+        f"dirty working tree blocks --worker aider --apply "
+        f"({len(dirty)} path(s) outside aider runtime allow-list)"
+    )
 
 
 def _resolve_workflow(project_root: str, override_path: str | None) -> Workflow | None:
@@ -264,6 +332,20 @@ def _apply_workflow_defaults(
         "Ignored when --worker stub. Mutually exclusive with --dry-run."
     ),
 )
+@click.option(
+    "--allow-dirty-tree",
+    "allow_dirty_tree",
+    is_flag=True,
+    default=False,
+    help=(
+        "Skip the A.7 pre-run dirty-tree pre-check. By default, "
+        "--worker aider --apply refuses to start if uncommitted changes "
+        "exist outside the aider runtime allow-list (.aider.*, "
+        ".ai-cockpit/suggestions/, .ai-cockpit/history/) so aider does "
+        "not squash your work-in-progress. Pass this flag only if you "
+        "deliberately want aider to edit on top of a dirty tree."
+    ),
+)
 @click.pass_context
 def run_cmd(
     ctx: click.Context,
@@ -282,6 +364,7 @@ def run_cmd(
     suggest: bool,
     worker_name: str,
     apply: bool,
+    allow_dirty_tree: bool,
 ) -> None:
     if no_checkpoint and (thread_id or resume or checkpoint_db):
         raise click.UsageError(
@@ -297,6 +380,12 @@ def run_cmd(
         raise click.UsageError("--apply is only meaningful with --worker aider")
     if apply and dry_run:
         raise click.UsageError("--apply and --dry-run are mutually exclusive")
+    if allow_dirty_tree and not (worker_name == "aider" and apply):
+        click.echo(
+            "warning: --allow-dirty-tree only affects --worker aider --apply; "
+            "ignored for the current invocation.",
+            err=True,
+        )
     # Safety default: aider worker is preview-only unless --apply is set.
     effective_dry_run = dry_run or (worker_name == "aider" and not apply)
 
@@ -305,6 +394,9 @@ def run_cmd(
         raise click.UsageError("idea must be a non-empty string")
 
     project_root = str(Path(root).resolve())
+
+    if worker_name == "aider" and apply and not allow_dirty_tree:
+        _enforce_dirty_tree_precheck(project_root)
 
     workflow = _resolve_workflow(project_root, workflow_path)
     mode, max_loops, test_commands = _apply_workflow_defaults(
