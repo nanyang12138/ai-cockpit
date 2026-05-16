@@ -29,7 +29,13 @@ Per-item rules:
 - Never commit anything matching `.ai-cockpit/memory/*` directly;
   go through `accept_suggestion` only. (Hard rule §3.2.)
 
-### A.1 — `ai-cockpit status` subcommand
+### A.1 — `ai-cockpit status` subcommand  ✅ DONE (PR #31, 2026-05-16)
+
+Shipped by ai-cockpit itself via `--worker aider --apply --llm auto`
+on 2026-05-16. The generated source matched this contract verbatim
+and merged without human edits. See `docs/V0_3_MILESTONES.md` for
+the full run record (prompt, cost, leftover-state confound,
+end-user-visible output).
 
 **Why:** today a user wanting to know "what's pending? what LLM
 will be used? which workflows are available?" has to grep the
@@ -259,6 +265,42 @@ Today planner produces one `implementation_slice`. Multi-step would
 let one user idea decompose into a small sequence of slices, each
 executed independently with verification between. Major design
 change — defer.
+
+### B.7 — pre-run dirty-tree pre-check  (surfaced by A.1 milestone)
+
+The 2026-05-16 A.1 milestone (`docs/V0_3_MILESTONES.md`) hit
+`decision: ask_human` for an entirely unrelated reason: the working
+tree had a leftover modification to `examples/broken_calc/calc.py`
+from the previous day's §15.1 demo that the human had forgotten to
+reset. ai-cockpit's output itself was correct, but the verifier's
+pytest run failed on the unrelated demo-guard test, and the
+reviewer correctly (and helplessly) flagged the unrelated state.
+
+**Scope (must):** before any non-dry-run invocation that has
+`--worker aider --apply`, the CLI should:
+
+1. Inspect `git status --porcelain` on `--root`.
+2. If there are modifications to files NOT mentioned in the
+   planner's `implementation_slice` (or, conservatively, ANY
+   modifications), print a warning and a one-line
+   `git checkout -- <file>` hint.
+3. Refuse to proceed unless a new `--allow-dirty-tree` flag is set,
+   OR the dirty files are inside the aider runtime-artifact
+   allow-list (`.aider.*`, `.ai-cockpit/suggestions/`).
+
+This is small (~50 net LOC, one file plus tests) and would
+eliminate the most common `ask_human` cause we observed across
+two real-LLM sessions.
+
+### B.8 — gitignore `.aider.*` runtime artifacts
+
+Same session: aider leaves `.aider.chat.history.md`,
+`.aider.input.history`, `.aider.tags.cache.v4/` in the repo root
+after each invocation. PR #24 already added `--no-gitignore` to
+keep aider from modifying the user's `.gitignore`; this item
+inverts that: it's our gitignore policy decision, not aider's.
+Either gitignore these patterns or have AiderWorker clean them
+up post-run. Trivial (~5 LOC).
 
 ---
 
