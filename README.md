@@ -275,6 +275,13 @@ src/ai_cockpit/
 tests/
 ```
 
+For a single-document map of how these pieces fit together — graph
+wiring, state ownership, worker / LLM protocols, the memory pipeline,
+workflow YAML, and the spec §9 anti-deception evidence flow — read
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). It is descriptive
+(reflects `master`), not aspirational; roadmap items still live in
+[`docs/ROADMAP.md`](docs/ROADMAP.md).
+
 ## Tests
 
 ```bash
