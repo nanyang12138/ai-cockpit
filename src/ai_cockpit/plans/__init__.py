@@ -7,16 +7,26 @@ interactive planner mirrors the same shape in
 this module's canonical :class:`Plan` without touching B.9 code.
 """
 
+from .dependencies import (
+    DependencyError,
+    check_dependencies,
+    find_plan_markers,
+    make_commit_marker,
+)
 from .loader import PlanFileError, load_plan, plan_path, save_plan
 from .schema import Plan, PlanSchemaError, Slice, from_planner_draft
 
 __all__ = [
+    "DependencyError",
     "Plan",
     "PlanFileError",
     "PlanSchemaError",
     "Slice",
+    "check_dependencies",
+    "find_plan_markers",
     "from_planner_draft",
     "load_plan",
+    "make_commit_marker",
     "plan_path",
     "save_plan",
 ]

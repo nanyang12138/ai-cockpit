@@ -476,6 +476,38 @@ def test_reviewer_prompt_excludes_verdict_lookalike_via_real_provider(
     )
 
 
+def test_reviewer_prompt_does_not_leak_plan_yaml_content() -> None:
+    """Anti-deception #5 (B.6): plan-YAML content MUST NOT enter the
+    reviewer prompt. ``mvp_spec`` and ``acceptance_criteria`` are the
+    only plan-derived fields the reviewer is allowed to see; ``user_input``,
+    ``idea``, ``implementation_slice``, slice ``why`` / ``scope_*`` /
+    ``dod`` and the trailing commit marker must all stay out, otherwise
+    a planner who frames work as "trivial" can talk the reviewer into
+    passing a failing run.
+    """
+    state: dict[str, Any] = {
+        "user_input": "PLAN_LEAK_USER_INPUT_marker the slice was rendered here",
+        "idea": "PLAN_LEAK_IDEA_marker -- whole-task plan idea, background only",
+        "mvp_spec": "PLAN_LEAK_MVP allowed -- this is reviewer-visible",
+        "acceptance_criteria": ["PLAN_LEAK_AC allowed -- AC bullet"],
+        "implementation_slice": "PLAN_LEAK_SLICE marker -- slice why/scope/dod",
+        "verification_result": _verification(True, exit_code=0, diff=""),
+    }
+    evidence = build_reviewer_evidence(state)  # type: ignore[arg-type]
+    system, user = build_reviewer_messages(evidence)
+    blob = system + "\n" + user
+    for forbidden in (
+        "PLAN_LEAK_USER_INPUT_marker",
+        "PLAN_LEAK_IDEA_marker",
+        "PLAN_LEAK_SLICE",
+    ):
+        assert forbidden not in blob, (
+            f"plan-YAML content {forbidden!r} leaked into reviewer prompt"
+        )
+    assert "PLAN_LEAK_MVP" in user
+    assert "PLAN_LEAK_AC" in user
+
+
 def test_planner_falls_back_to_stub_on_empty_acceptance_criteria() -> None:
     """Valid-JSON planner reply with empty acceptance_criteria → stub.
 

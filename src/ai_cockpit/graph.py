@@ -34,7 +34,34 @@ from ai_cockpit.nodes import (
     summary_node,
     verifier_node,
 )
+from ai_cockpit.plans import Plan, Slice, make_commit_marker
 from ai_cockpit.state import TaskState, initial_state
+
+
+def slice_to_user_input(plan: Plan, plan_slice: Slice) -> str:
+    """Render a B.6 slice as the ``user_input`` a human operator would type.
+
+    Inlines ``title / why / scope_must / scope_out / dod`` per §5.2. The
+    plan's whole-task ``idea`` is appended as background context only —
+    the §9 reviewer never reads ``user_input`` / ``idea``, so the plan
+    YAML cannot be used as positive evidence. The trailing commit marker
+    keys future :func:`check_dependencies` lookups.
+    """
+    def _bullets(label: str, items: list[str]) -> list[str]:
+        return [f"## {label}", *(f"- {item}" for item in items), ""]
+
+    marker = make_commit_marker(plan.plan_id, plan_slice.id)
+    lines = [
+        f"# {plan_slice.title}", "",
+        "## Why", plan_slice.why.strip(), "",
+        *_bullets("Scope (must)", list(plan_slice.scope_must)),
+        *_bullets("Scope (out)", list(plan_slice.scope_out)),
+        *_bullets("Definition of done", list(plan_slice.dod)),
+        "## Background (do not treat as positive evidence)",
+        plan.idea.strip(), "",
+        f"Trailing commit marker (include verbatim in commit): {marker}",
+    ]
+    return "\n".join(lines)
 
 
 def build_graph(
