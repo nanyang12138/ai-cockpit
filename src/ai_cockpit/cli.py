@@ -10,7 +10,9 @@ silently prepends ``run`` before dispatching.
 
 from __future__ import annotations
 
+import re
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 
 import click
@@ -19,6 +21,7 @@ from ai_cockpit.checkpoint import new_thread_id, resolve_checkpoint_db
 from ai_cockpit.graph import run_graph
 from ai_cockpit.llm import build_llm
 from ai_cockpit.memory.suggestions import (
+    Suggestion,
     SuggestionError,
     accept_suggestion,
     generate_and_write,
@@ -463,6 +466,67 @@ _ROOT_OPTION = click.option(
 )
 
 
+# A.2 (2026-05-16): ``memory list`` gained an ``age:`` column and a one-line
+# aggregate summary. The decision label that drove the original run lives in
+# the suggestion id (canonical) and in the rationale text (fallback); we
+# extract from whichever is available so user-crafted suggestions still
+# render cleanly without contributing to either subtotal.
+_DECISION_FROM_ID_RE = re.compile(r"^\d{8}T\d{6}-(done|ask_human)-")
+_DECISION_FROM_RATIONALE_RE = re.compile(r"decision=([A-Za-z_]+)")
+
+
+def _parse_created_at(s: Suggestion) -> datetime:
+    """Parse a suggestion's ``created_at`` to an aware UTC datetime.
+
+    Falls back to a sentinel far in the past so malformed timestamps sort to
+    the bottom of a ``reverse=True`` listing rather than crashing the CLI.
+    """
+    try:
+        dt = datetime.fromisoformat(s.created_at)
+    except (TypeError, ValueError):
+        return datetime.min.replace(tzinfo=UTC)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt
+
+
+def _format_age(s: Suggestion, *, now: datetime) -> str:
+    """Render ``created_at`` as ``Nd Nh ago`` relative to ``now``.
+
+    Returns ``"?d ?h ago"`` if the timestamp can't be parsed and ``"0d 0h ago"``
+    if the timestamp is in the future (clock skew); never raises.
+    """
+    try:
+        dt = datetime.fromisoformat(s.created_at)
+    except (TypeError, ValueError):
+        return "?d ?h ago"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    seconds = int((now - dt).total_seconds())
+    if seconds < 0:
+        return "0d 0h ago"
+    days, remainder = divmod(seconds, 86400)
+    hours = remainder // 3600
+    return f"{days}d {hours}h ago"
+
+
+def _decision_of(s: Suggestion) -> str | None:
+    """Best-effort extraction of the run decision that produced a suggestion.
+
+    Suggestions written by ``build_suggestion_from_state`` encode the decision
+    twice: in the id (``<ts>-<decision>-<slug>``) and in the rationale
+    (``decision=<value>``). Either match is enough; manually-crafted
+    suggestions with neither return ``None``.
+    """
+    m = _DECISION_FROM_ID_RE.match(s.id)
+    if m:
+        return m.group(1)
+    m2 = _DECISION_FROM_RATIONALE_RE.search(s.rationale or "")
+    if m2:
+        return m2.group(1)
+    return None
+
+
 @memory_group.command(name="list", help="List pending memory suggestions.")
 @_ROOT_OPTION
 def memory_list_cmd(root: str) -> None:
@@ -470,9 +534,25 @@ def memory_list_cmd(root: str) -> None:
     if not suggestions:
         click.echo("no pending memory suggestions")
         return
+    suggestions.sort(key=_parse_created_at, reverse=True)
+    now = datetime.now(UTC)
+    done_count = 0
+    ask_human_count = 0
     for s in suggestions:
         first_line = s.content.splitlines()[0] if s.content else ""
-        click.echo(f"{s.id}\t{s.target}\t{s.operation}\t{first_line}")
+        age = _format_age(s, now=now)
+        click.echo(
+            f"age: {age}\t{s.id}\t{s.target}\t{s.operation}\t{first_line}"
+        )
+        decision = _decision_of(s)
+        if decision == "done":
+            done_count += 1
+        elif decision == "ask_human":
+            ask_human_count += 1
+    click.echo(
+        f"total: {len(suggestions)} "
+        f"(done: {done_count}, ask_human: {ask_human_count})"
+    )
 
 
 @memory_group.command(name="show", help="Show one pending memory suggestion in full.")
