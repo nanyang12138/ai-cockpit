@@ -263,6 +263,12 @@ Rules:
 Cursor is therefore an accelerator for users who already have it, not a
 dependency of `ai-cockpit`.
 
+2026-05-16 addendum: this optional Cursor planner backend is now part of
+the broader Cursor-backed role backend direction captured in
+`docs/B_10_CURSOR_ROLE_BACKENDS_CONTRACT.md`. If B.10 is open-gated, do
+not implement Cursor support as a one-off B.9 adapter; implement it as
+the B.10 Cursor Planner backend that plugs into this B.9 REPL.
+
 ## 10. Plan artifact compatibility
 
 B.9 saves the same plan artifact shape described in

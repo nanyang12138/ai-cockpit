@@ -382,6 +382,46 @@ authorized; later source work is NOT authorized until the user
 explicitly says "open-gate B.9b" / "open-gate B.9c" / "open-gate B.9d"
 (or equivalent).
 
+2026-05-16 addendum: the optional Cursor planner backend should be
+implemented through B.10's broader Cursor-backed role backend contract,
+not as an isolated B.9-only adapter.
+
+### B.10 — Cursor-backed role backends
+
+**Status: contract authored 2026-05-16, awaiting user open-gate signal.**
+Full design lives in `docs/B_10_CURSOR_ROLE_BACKENDS_CONTRACT.md`.
+
+B.10 captures the user's preferred direction: use Cursor as the high-
+capability agent engine for roles, while `ai-cockpit` remains the
+manager / policy / memory / verifier / evidence-boundary layer.
+
+Target shape:
+
+```text
+ai-cockpit Manager / Controller
+  -> Cursor-backed Planner Agent
+  -> Cursor-backed Worker Agent
+  -> deterministic Verifier
+  -> Cursor-backed Reviewer Agent
+  -> ai-cockpit Decision / Memory / Summary
+```
+
+Key locked decisions:
+
+| # | Decision |
+| --- | --- |
+| Q1 | Cursor is a role backend, not the `ai-cockpit` manager. The Python/LangGraph controller still owns sequencing and policy. |
+| Q2 | Planner, Worker, Reviewer, and optional Writer may be Cursor-backed. Verifier must remain deterministic shell/git/test evidence collection. |
+| Q3 | Cursor roles are invoked serially by `ai-cockpit`; no agent-to-agent swarm, A2A server, or role-to-role chat. |
+| Q4 | Cursor Reviewer receives only the existing §9 evidence bundle; Cursor Worker self-report and planner transcripts are forbidden as reviewer evidence. |
+| Q5 | Cursor is optional. Builtin/stub/Aider paths remain valid fallbacks. |
+| Q6 | Implementation starts with `ai-cockpit cursor status` discovery, because the installed Cursor CLI name/flags/trust behavior vary by environment. |
+
+Implementation splits into B.10a adapter discovery, B.10b Cursor Planner
+backend, B.10c Cursor Worker backend, B.10d Cursor Reviewer backend, and
+optional B.10e Cursor Writer backend. Source work is NOT authorized until
+the user explicitly says "open-gate B.10a" (or equivalent).
+
 ---
 
 ## Section C — permanent boundaries (never relax)
