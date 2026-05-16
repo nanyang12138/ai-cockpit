@@ -430,8 +430,18 @@ Key locked decisions:
 
 Implementation splits into B.10a adapter discovery, B.10b Cursor Planner
 backend, B.10c Cursor Worker backend, B.10d Cursor Reviewer backend, and
-optional B.10e Cursor Writer backend. Source work is NOT authorized until
-the user explicitly says "open-gate B.10a" (or equivalent).
+optional B.10e Cursor Writer backend.
+
+- **B.10a — delivered 2026-05-16.** `ai-cockpit cursor status` ships
+  the read-only Cursor CLI discovery probe from contract §11/§9: it
+  resolves a binary (default order `agent` → `cursor-agent` →
+  `cursor`, overridable via `--binary`), parses `--version` (with
+  `-v` fallback), and inspects `--help` for advertised `--mode`
+  values plus tri-state flags for `--print --output-format=json`,
+  `--yolo`/`--trust`, and `--resume`/`session`. All tests use fake
+  binaries + an injected runner; the real Cursor CLI is never called.
+- B.10b–B.10e source work remains NOT authorized until the user
+  explicitly says "open-gate B.10b" (or equivalent).
 
 ---
 

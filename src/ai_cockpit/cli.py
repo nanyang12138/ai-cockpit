@@ -18,6 +18,10 @@ from pathlib import Path
 import click
 
 from ai_cockpit.checkpoint import new_thread_id, resolve_checkpoint_db
+from ai_cockpit.cursor_adapter import (
+    CursorAdapterStatus,
+    probe_cursor_adapter,
+)
 from ai_cockpit.graph import run_graph, slice_to_user_input
 from ai_cockpit.llm import build_llm
 from ai_cockpit.memory.suggestions import (
@@ -1000,6 +1004,52 @@ def _next_undone_slice_id(plan: Plan, done: set[str]) -> str:
         if plan_slice.id not in done:
             return plan_slice.id
     return "-"
+
+
+# --- cursor subgroup (B.10a) — read-only Cursor CLI discovery probe --------
+
+
+@main.group(name="cursor", help="Probe the local Cursor CLI without side effects.")
+def cursor_group() -> None:
+    """B.10 Cursor role-backend subcommands. B.10a ships ``status`` only."""
+
+
+_CURSOR_FIELDS = (
+    "binary_name", "binary_path", "available", "version", "supported_modes",
+    "json_print_advertised", "trust_flag_advertised", "resume_flag_advertised",
+)
+
+
+def _fmt_cursor(value: object) -> str:
+    if value is None:
+        return "unknown"
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    if isinstance(value, tuple):
+        return ", ".join(value) if value else "-"
+    return str(value) if value else "-"
+
+
+def _render_cursor_status(status: CursorAdapterStatus) -> list[str]:
+    lines = [f"{f}: {_fmt_cursor(getattr(status, f))}" for f in _CURSOR_FIELDS]
+    if status.errors:
+        lines.append("errors:")
+        lines.extend(f"  - {err}" for err in status.errors)
+    if not status.available:
+        lines.append(
+            "hint: install Cursor CLI or use --binary <path>; ai-cockpit will "
+            "fall back to builtin / aider backends."
+        )
+    return lines
+
+
+@cursor_group.command(name="status", help="Probe Cursor CLI (read-only).")
+@click.option("--binary", "binary_override", default=None,
+              help="Pin a binary name or path (overrides auto-discovery).")
+def cursor_status_cmd(binary_override: str | None) -> None:
+    """Print a YAML-ish discovery report for the local Cursor CLI."""
+    for line in _render_cursor_status(probe_cursor_adapter(binary_override=binary_override)):
+        click.echo(line)
 
 
 @plans_group.command(name="list", help="List plan artifacts under docs/plans/.")
