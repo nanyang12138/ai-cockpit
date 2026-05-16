@@ -163,6 +163,57 @@ def test_memory_accept_full_lifecycle(tmp_path: Path) -> None:
     assert "- decision: done" in body
 
 
+def test_memory_list_shows_age_and_summary(tmp_path: Path) -> None:
+    """A.2: list output gains an ``age:`` column per row plus a one-line
+    aggregate ``total: N (done: A, ask_human: B)`` at the end, with
+    rows sorted by ``created_at`` descending."""
+
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    fixtures = [
+        ("done", now - timedelta(days=2, hours=3), "oldest done idea"),
+        ("ask_human", now - timedelta(hours=5), "middle ask_human idea"),
+        ("done", now - timedelta(minutes=30), "newest done idea"),
+    ]
+    ids: list[str] = []
+    for decision, when, slug in fixtures:
+        sid = when.strftime("%Y%m%dT%H%M%S") + f"-{decision}-{slug.replace(' ', '-')}"
+        ids.append(sid)
+        s = Suggestion(
+            id=sid,
+            created_at=when.isoformat(timespec="seconds"),
+            target="project.md",
+            operation="append",
+            content=f"## {slug}\n\n- decision: {decision}\n",
+            rationale=f"auto-generated from run; decision={decision}",
+        )
+        write_suggestion(tmp_path, s)
+
+    result = CliRunner().invoke(cli_main, ["memory", "list", "--root", str(tmp_path)])
+
+    assert result.exit_code == 0, result.output + (result.stderr or "")
+    out = result.output
+
+    assert "total: 3 (done: 2, ask_human: 1)" in out
+
+    for sid in ids:
+        assert sid in out, f"missing {sid} in output:\n{out}"
+
+    newest_pos = out.index(ids[2])
+    middle_pos = out.index(ids[1])
+    oldest_pos = out.index(ids[0])
+    assert newest_pos < middle_pos < oldest_pos, (
+        f"expected newest-first ordering; got positions "
+        f"newest={newest_pos} middle={middle_pos} oldest={oldest_pos}\n{out}"
+    )
+
+    lines = [ln for ln in out.splitlines() if ln.startswith("age:")]
+    assert len(lines) == 3, f"expected 3 row lines, got {len(lines)}:\n{out}"
+    for ln in lines:
+        assert "d " in ln and "h ago" in ln, f"bad age format in: {ln!r}"
+
+
 def test_memory_list_skips_corrupt_json(tmp_path: Path) -> None:
     """A garbage JSON in the suggestions dir must not crash `memory list`."""
 
