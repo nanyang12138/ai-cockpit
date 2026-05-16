@@ -7,41 +7,15 @@ from pathlib import Path
 import click
 
 from ai_cockpit.memory.loader import load_memory
+from ai_cockpit.planner_interactive.backends import BuiltinPlannerBackend
 from ai_cockpit.planner_interactive.types import (
     PlanDraft,
     PlannerBackend,
     PlannerRequest,
-    PlannerResponse,
     PlanValidationError,
     default_plan_path,
     save_plan_atomic,
 )
-
-
-class FixturePlannerBackend:
-    """Deterministic B.9a backend used for tests and `--llm none`."""
-
-    name = "fixture"
-
-    def __init__(self) -> None:
-        self._draft: PlanDraft | None = None
-
-    def start(self, request: PlannerRequest) -> PlannerResponse:
-        self._draft = PlanDraft.fixture(request.idea)
-        return PlannerResponse(
-            "B.9a fixture planner ready. Use /show, /save [path], or /abort.",
-            self._draft,
-        )
-
-    def respond(self, text: str) -> PlannerResponse:
-        return PlannerResponse(
-            f"Recorded feedback for a future planner backend: {text}",
-            self._draft,
-        )
-
-    def draft(self) -> PlanDraft | None:
-        return self._draft
-
 
 HELP_TEXT = """Commands:
   /help              Show this help.
@@ -55,10 +29,12 @@ HELP_TEXT = """Commands:
 
 
 def build_planner_backend(request: PlannerRequest) -> PlannerBackend:
-    """Return the backend for B.9a.
+    """Return the backend for the interactive planner.
 
-    Real LLM-backed and Cursor-backed implementations are intentionally
-    deferred to B.9b/B.9d. B.9a only establishes the stable REPL boundary.
+    B.9b ships the builtin backend shell with the read-only tool
+    registry wired in deterministic ``--llm none`` mode. LLM-backed
+    behavior is added in B.9c. The optional Cursor backend ships through
+    B.10's role-backend track, not as a one-off B.9 adapter.
     """
 
     if request.backend != "builtin":
@@ -68,9 +44,10 @@ def build_planner_backend(request: PlannerRequest) -> PlannerBackend:
         )
     if request.llm_mode != "none":
         raise click.ClickException(
-            "B.9a only supports --llm none. LLM-backed planning is B.9c."
+            "B.9b builtin backend only supports --llm none. "
+            "LLM-backed planning is B.9c."
         )
-    return FixturePlannerBackend()
+    return BuiltinPlannerBackend(llm_mode=request.llm_mode)
 
 
 def run_interactive_planner(
@@ -123,7 +100,7 @@ def run_interactive_planner(
             _handle_feedback(planner, feedback or "(no feedback supplied)")
             turns += 1
         elif command == "/tools":
-            click.echo("No read-only tools are wired in B.9a; see B.9b.")
+            _show_tools(planner)
         elif command.startswith("/save"):
             target = _resolve_save_path(
                 project_root,
@@ -160,6 +137,17 @@ def run_interactive_planner(
 def _handle_feedback(planner: PlannerBackend, feedback: str) -> None:
     response = planner.respond(feedback)
     click.echo(response.message)
+
+
+def _show_tools(planner: PlannerBackend) -> None:
+    tools_fn = getattr(planner, "tools", None)
+    registry = tools_fn() if callable(tools_fn) else None
+    if not registry:
+        click.echo("No read-only tools are available in this backend.")
+        return
+    click.echo("Read-only planner tools:")
+    for tool in registry.values():
+        click.echo(f"- {tool.name}: {tool.description}")
 
 
 def _show_draft_summary(draft: PlanDraft | None) -> None:
