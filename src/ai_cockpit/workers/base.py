@@ -25,11 +25,20 @@ class WorkerRequest:
 
 @dataclass(frozen=True)
 class WorkerResult:
-    """Structured worker output. `changed_files` may be empty for stubs."""
+    """Structured worker output. `changed_files` may be empty for stubs.
+
+    ``metrics`` holds optional structured numeric signal extracted from the
+    worker's output (e.g., tokens / cost lines parsed from aider stdout in
+    v0.3 / A.3). Keys are worker-defined; an empty dict means the worker
+    either has no metrics to surface or could not parse them from its
+    output. Downstream consumers must treat absence as "unknown", never as
+    zero.
+    """
 
     summary: str
     changed_files: list[str] = field(default_factory=list)
     notes: str = ""
+    metrics: dict[str, float] = field(default_factory=dict)
 
 
 class Worker(Protocol):

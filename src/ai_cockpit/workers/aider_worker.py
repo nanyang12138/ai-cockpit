@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import subprocess
 import tempfile
 from collections.abc import Callable, Sequence
@@ -34,6 +35,67 @@ import yaml
 from ai_cockpit.workers.base import WorkerRequest, WorkerResult
 
 log = logging.getLogger(__name__)
+
+# Aider prints rolling token / cost accounting on its own stdout lines, e.g.
+# ``Tokens: 6.7k sent, 316 received.`` followed by ``Cost: $0.04 message,
+# $0.04 session.`` (aider 0.86 ``aider.coders.base_coder``; see the §15.1
+# demo run archived in docs/V0_3_MILESTONES.md). A.3 surfaces those numbers
+# as structured ``metrics`` on WorkerResult. Silent fallback on regex miss.
+_TOKENS_RE = re.compile(
+    r"^\s*Tokens:\s+(?P<sent>[\d.]+)(?P<sent_unit>[kKmM]?)\s+sent,\s+"
+    r"(?P<recv>[\d.]+)(?P<recv_unit>[kKmM]?)\s+received\.?\s*$",
+    re.MULTILINE,
+)
+_COST_RE = re.compile(
+    r"^\s*Cost:\s+\$(?P<msg>[\d.]+)\s+message,\s+\$(?P<session>[\d.]+)\s+session\.?",
+    re.MULTILINE,
+)
+_TOKEN_UNIT_MULTIPLIER: dict[str, float] = {
+    "": 1.0, "k": 1_000.0, "K": 1_000.0, "m": 1_000_000.0, "M": 1_000_000.0,
+}
+
+
+def _scale_token_count(value: str, unit: str) -> float | None:
+    try:
+        return float(value) * _TOKEN_UNIT_MULTIPLIER.get(unit, 1.0)
+    except ValueError:
+        return None
+
+
+def _extract_aider_metrics(stdout: str) -> dict[str, float]:
+    """Pull token / cost metrics from aider stdout; last match wins.
+
+    Returns a dict with any subset of ``tokens_sent``, ``tokens_received``,
+    ``cost_message_usd``, ``cost_session_usd``. Absent keys mean the regex
+    did not match — callers MUST treat absence as "unknown", not zero. On
+    multi-turn runs aider prints one pair of lines per round-trip; we take
+    the LAST so the values reflect cumulative session totals.
+    """
+
+    out: dict[str, float] = {}
+    if not stdout:
+        return out
+    tokens_matches = list(_TOKENS_RE.finditer(stdout))
+    if tokens_matches:
+        last = tokens_matches[-1]
+        sent = _scale_token_count(last.group("sent"), last.group("sent_unit"))
+        recv = _scale_token_count(last.group("recv"), last.group("recv_unit"))
+        if sent is not None:
+            out["tokens_sent"] = sent
+        if recv is not None:
+            out["tokens_received"] = recv
+    cost_matches = list(_COST_RE.finditer(stdout))
+    if cost_matches:
+        last = cost_matches[-1]
+        try:
+            out["cost_message_usd"] = float(last.group("msg"))
+        except ValueError:
+            pass
+        try:
+            out["cost_session_usd"] = float(last.group("session"))
+        except ValueError:
+            pass
+    return out
 
 DEFAULT_AIDER_ARGS: tuple[str, ...] = (
     "--yes-always",
@@ -276,4 +338,9 @@ class AiderWorker:
             if completed.returncode == 0
             else f"aider exited non-zero: {completed.returncode}."
         )
-        return WorkerResult(summary=summary, changed_files=[], notes=notes)
+        # A.3: parse cost / token signal out of aider's stdout. Silent
+        # fallback on regex miss — never propagate a parsing surprise.
+        metrics = _extract_aider_metrics(completed.stdout or "")
+        return WorkerResult(
+            summary=summary, changed_files=[], notes=notes, metrics=metrics
+        )
