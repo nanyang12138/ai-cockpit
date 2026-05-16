@@ -15,7 +15,7 @@ from pathlib import Path
 
 import click
 
-from ai_cockpit.checkpoint import new_thread_id
+from ai_cockpit.checkpoint import new_thread_id, resolve_checkpoint_db
 from ai_cockpit.graph import run_graph
 from ai_cockpit.llm import build_llm
 from ai_cockpit.memory.suggestions import (
@@ -31,6 +31,16 @@ from ai_cockpit.workflow import (
     default_workflow_path,
     load_workflow,
 )
+
+
+def _get_version() -> str:
+    """Return the installed package version, or 'dev' when not installed."""
+    try:
+        from importlib.metadata import version as _pkg_version
+
+        return _pkg_version("ai-cockpit")
+    except Exception:
+        return "dev"
 
 
 class _DefaultGroup(click.Group):
@@ -364,6 +374,75 @@ def run_cmd(
                     "`ai-cockpit memory accept <id>` to apply.",
                     err=True,
                 )
+
+
+# ---------------------------------------------------------------------------
+# status subcommand
+# ---------------------------------------------------------------------------
+
+
+def _count_workflow_files(project_root: str) -> int:
+    """Count .yaml and .yml files under <project_root>/.ai-cockpit/workflows/."""
+    workflows_dir = Path(project_root) / ".ai-cockpit" / "workflows"
+    if not workflows_dir.is_dir():
+        return 0
+    count = 0
+    for ext in ("*.yaml", "*.yml"):
+        count += len(list(workflows_dir.glob(ext)))
+    return count
+
+
+def _probe_llm_auto() -> str:
+    """Check whether ``build_llm("auto")`` can construct a provider.
+
+    Returns ``"available (<name>)"`` or ``"unavailable"`` — never calls the
+    LLM.
+    """
+    try:
+        llm = build_llm("auto")
+    except Exception:
+        return "unavailable"
+    if llm is None:
+        return "unavailable"
+    return f"available ({llm.name})"
+
+
+@main.command(
+    name="status",
+    help=(
+        "Show project status: version, root, LLM availability, workflows, "
+        "suggestions, checkpoint DB."
+    ),
+)
+@click.option(
+    "--root",
+    "root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+    help="Project root to inspect.",
+)
+def status_cmd(root: str) -> None:
+    """Print a concise status report for the current project."""
+    project_root = str(Path(root).resolve())
+
+    version = _get_version()
+    llm_mode_auto = _probe_llm_auto()
+    workflows_found = _count_workflow_files(project_root)
+    suggestions_pending = len(list_suggestions(project_root))
+    checkpoint_db = str(resolve_checkpoint_db(project_root))
+
+    click.echo(f"version: {version}")
+    click.echo(f"project_root: {project_root}")
+    click.echo(f"llm_mode_auto: {llm_mode_auto}")
+    click.echo(f"workflows_found: {workflows_found}")
+    click.echo(f"suggestions_pending: {suggestions_pending}")
+    click.echo(f"checkpoint_db: {checkpoint_db}")
+
+
+# ---------------------------------------------------------------------------
+# memory subgroup
+# ---------------------------------------------------------------------------
 
 
 @main.group(
