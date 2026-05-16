@@ -301,12 +301,43 @@ v0.4: "ai-cockpit can iterate a failing test to green AND keep
 project memory consistent across runs". This must be defined by the
 user, not cron, because it sets the bar for declaring v0.4 done.
 
-### B.6 — multi-step planning
+### B.6 — multi-step planner & plan artifact
 
-Today planner produces one `implementation_slice`. Multi-step would
-let one user idea decompose into a small sequence of slices, each
-executed independently with verification between. Major design
-change — defer.
+**Status: contract authored 2026-05-16, awaiting user open-gate signal.**
+Full design lives in `docs/B_6_CONTRACT.md` (audit-trail-grade,
+~340 lines). The summary:
+
+Today the planner produces one `implementation_slice` and `ai-cockpit
+run` consumes exactly one idea. Complex tasks have to be hand-
+decomposed by the operator before they can enter the pipeline. B.6
+internalizes the decomposition step **without introducing a second
+writer agent**, using the Magentic-One Task Ledger / Plan-then-Execute
+shape that the 2025–2026 multi-agent literature has converged on as
+the only multi-step pattern that survives production.
+
+The contract is locked along these axes (Q1–Q6, resolved with the user
+on 2026-05-16):
+
+| # | Decision |
+| --- | --- |
+| Q1 | Plan file format: `.plan.yaml` (Pydantic-validated, markdown-content fields allowed via YAML `\|` multi-line blocks). |
+| Q2 | CLI shape: new `ai-cockpit plans run <plan_id> <slice_id>` under the `plans` group; `run` is **not** extended. |
+| Q3 | No hard schema cap on `len(slices)` — operator concern, not safety. |
+| Q4 | `--max-slices` flag retained on `ai-cockpit plan`; **default = unbounded.** |
+| Q5 | Cron authorization for executing slices: **two keys** — plan YAML merged to `master` AND `V0_3_STATUS.md` explicitly names `active_plan_id: <id>`. Both required; absence of either ⇒ idle-healthy. |
+| Q6 | Dropped — no per-call cost cap (inconsistent with v0.2/v0.3 elsewhere). |
+
+Implementation splits into three serial PRs (B.6a / B.6b / B.6c) under
+the same ≤8 files / ≤400 net LOC cap as every other step. See
+`docs/B_6_CONTRACT.md` §6 for the file budget and §7 for the threat
+model.
+
+**Permission rule (binding on cron):** cron is NOT authorized to start
+B.6a until the user explicitly says "open-gate B.6a" (or equivalent).
+Even the contract-PR itself was opened only because the user pre-
+authorized writing the contract during the 2026-05-16 design
+conversation. Section B as a whole still requires fresh user direction
+per `V0_3_STATUS.md`.
 
 ### (B.7 and B.8 promoted to Section A — see A.7 / A.8 above.)
 
