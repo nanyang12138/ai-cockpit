@@ -6,6 +6,7 @@ from pathlib import Path
 
 import click
 
+from ai_cockpit.llm import build_llm
 from ai_cockpit.memory.loader import load_memory
 from ai_cockpit.planner_interactive.backends import BuiltinPlannerBackend
 from ai_cockpit.planner_interactive.types import (
@@ -31,10 +32,12 @@ HELP_TEXT = """Commands:
 def build_planner_backend(request: PlannerRequest) -> PlannerBackend:
     """Return the backend for the interactive planner.
 
-    B.9b ships the builtin backend shell with the read-only tool
-    registry wired in deterministic ``--llm none`` mode. LLM-backed
-    behavior is added in B.9c. The optional Cursor backend ships through
-    B.10's role-backend track, not as a one-off B.9 adapter.
+    B.9b shipped the builtin backend shell with the read-only tool
+    registry in deterministic ``--llm none`` mode. B.9c wires the
+    existing :class:`LLMProvider` factory so non-``none`` modes ask a
+    real LLM for a structured ``PlanDraft`` payload. The optional
+    Cursor backend ships through B.10's role-backend track, not as a
+    one-off B.9 adapter.
     """
 
     if request.backend != "builtin":
@@ -42,12 +45,20 @@ def build_planner_backend(request: PlannerRequest) -> PlannerBackend:
             f"planner backend {request.backend!r} is not implemented yet; "
             "use --backend builtin"
         )
+    backend = BuiltinPlannerBackend(llm_mode=request.llm_mode)
     if request.llm_mode != "none":
-        raise click.ClickException(
-            "B.9b builtin backend only supports --llm none. "
-            "LLM-backed planning is B.9c."
-        )
-    return BuiltinPlannerBackend(llm_mode=request.llm_mode)
+        llm = build_llm(request.llm_mode)
+        if llm is None:
+            click.echo(
+                "warning: --llm requested but no usable LLM is available "
+                "(missing credentials or optional package); falling back "
+                "to the deterministic fixture draft.",
+                err=True,
+            )
+        else:
+            click.echo(f"info: planner LLM enabled ({llm.name})", err=True)
+        backend.bind_llm(llm)
+    return backend
 
 
 def run_interactive_planner(

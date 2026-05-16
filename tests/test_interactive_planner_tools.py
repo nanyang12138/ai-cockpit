@@ -119,8 +119,12 @@ def test_registry_and_builtin_backend(tmp_path: Path) -> None:
     assert "Builtin planner ready" in response.message
     assert expected.issubset(backend.tools())
 
-    with pytest.raises(ValueError, match="builtin backend only supports llm_mode='none'"):
-        BuiltinPlannerBackend(llm_mode="anthropic")
+    # Without bind_llm(), even a non-'none' mode falls back to the
+    # deterministic fixture (B.9c keeps the safe default for tests).
+    unbound = BuiltinPlannerBackend(llm_mode="anthropic")
+    unbound_response = unbound.start(_request(tmp_path))
+    assert unbound_response.draft is not None
+    assert "Builtin planner ready" in unbound_response.message
 
 
 def test_plan_tools_command_lists_registered_tools(tmp_path: Path) -> None:

@@ -503,7 +503,10 @@ def run_cmd(
     default="auto",
     show_default=True,
     type=click.Choice(["none", "auto", "anthropic", "openai"], case_sensitive=False),
-    help="'none' uses the deterministic B.9a fixture; real LLM support is B.9c.",
+    help=(
+        "'none' uses the deterministic B.9a fixture; 'auto'/'anthropic'/"
+        "'openai' route through the existing LLMProvider factory (B.9c)."
+    ),
 )
 @click.option(
     "--backend",
@@ -511,7 +514,7 @@ def run_cmd(
     default="builtin",
     show_default=True,
     type=click.Choice(["builtin", "cursor"], case_sensitive=False),
-    help="Planner backend. B.9a implements only the builtin fixture backend.",
+    help="Planner backend. B.9 ships only the builtin backend; cursor is B.10.",
 )
 @click.option(
     "--max-slices",
