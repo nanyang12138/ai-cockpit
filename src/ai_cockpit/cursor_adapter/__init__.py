@@ -16,6 +16,11 @@ from ai_cockpit.cursor_adapter.planner import (
     CursorSessionFactory,
     CursorUnavailableError,
 )
+from ai_cockpit.cursor_adapter.reviewer import (
+    CursorReviewerBackend,
+    CursorReviewerSession,
+    CursorReviewerSessionFactory,
+)
 from ai_cockpit.cursor_adapter.worker import (
     CursorWorker,
     CursorWorkerSession,
@@ -27,6 +32,9 @@ __all__ = [
     "CursorAdapterStatus",
     "CursorPlannerBackend",
     "CursorPlannerSession",
+    "CursorReviewerBackend",
+    "CursorReviewerSession",
+    "CursorReviewerSessionFactory",
     "CursorSessionFactory",
     "CursorUnavailableError",
     "CursorWorker",

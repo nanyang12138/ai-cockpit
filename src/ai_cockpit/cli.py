@@ -20,10 +20,11 @@ import click
 from ai_cockpit.checkpoint import new_thread_id, resolve_checkpoint_db
 from ai_cockpit.cursor_adapter import (
     CursorAdapterStatus,
+    CursorReviewerBackend,
     probe_cursor_adapter,
 )
 from ai_cockpit.graph import run_graph, slice_to_user_input
-from ai_cockpit.llm import build_llm
+from ai_cockpit.llm import LLMProvider, build_llm
 from ai_cockpit.memory.suggestions import (
     Suggestion,
     SuggestionError,
@@ -51,6 +52,20 @@ from ai_cockpit.workflow import (
     default_workflow_path,
     load_workflow,
 )
+
+_REVIEWER_BACKEND_CHOICES = ("builtin", "cursor")
+
+
+def _resolve_reviewer_backend(
+    reviewer: str, *, llm: LLMProvider | None
+) -> LLMProvider | None:
+    """B.10d: route ``--reviewer cursor`` to ``CursorReviewerBackend``;
+    builtin falls through to ``llm`` (planner LLM doubles as reviewer LLM
+    when present, else the deterministic §9 path). ``build_reviewer_evidence``
+    enforces the coder-self-report exclusion uniformly across backends."""
+    if (reviewer or "builtin").lower() == "cursor":
+        return CursorReviewerBackend()
+    return llm
 
 
 def _get_version() -> str:
@@ -366,6 +381,15 @@ def _apply_workflow_defaults(
         "deliberately want aider to edit on top of a dirty tree."
     ),
 )
+@click.option(
+    "--reviewer", "reviewer_backend", default="builtin", show_default=True,
+    type=click.Choice(_REVIEWER_BACKEND_CHOICES, case_sensitive=False),
+    help=(
+        "Reviewer backend. 'builtin' (default) uses --llm or the "
+        "deterministic §9 reviewer. 'cursor' (B.10d) routes review "
+        "through Cursor; prompt is still §9 evidence only."
+    ),
+)
 @click.pass_context
 def run_cmd(
     ctx: click.Context,
@@ -385,6 +409,7 @@ def run_cmd(
     worker_name: str,
     apply: bool,
     allow_dirty_tree: bool,
+    reviewer_backend: str,
 ) -> None:
     if no_checkpoint and (thread_id or resume or checkpoint_db):
         raise click.UsageError(
@@ -472,6 +497,10 @@ def run_cmd(
                 err=True,
             )
 
+    reviewer_llm = _resolve_reviewer_backend(reviewer_backend, llm=llm)
+    if reviewer_backend.lower() == "cursor":
+        click.echo("info: reviewer=cursor (Cursor receives §9 evidence only)", err=True)
+
     final_state = run_graph(
         user_input=user_input,
         project_root=project_root,
@@ -484,6 +513,7 @@ def run_cmd(
         thread_id=effective_thread_id,
         resume=resume,
         worker_name=worker_name,
+        reviewer_llm=reviewer_llm,
     )
 
     if suggest and final_state is not None:
@@ -925,6 +955,10 @@ def _resolve_plan_or_die(project_root: Path, plan_id: str) -> Plan:
               type=click.IntRange(min=0, max=10))
 @click.option("--no-checkpoint", "no_checkpoint", is_flag=True, default=False)
 @click.option("--dry-run", "dry_run", is_flag=True, default=False)
+@click.option("--reviewer", "reviewer_backend", default="builtin",
+              show_default=True,
+              type=click.Choice(_REVIEWER_BACKEND_CHOICES, case_sensitive=False),
+              help="Reviewer backend (see `ai-cockpit run --help` for B.10d details).")
 def plans_run_cmd(
     plan_id: str,
     slice_id: str,
@@ -935,6 +969,7 @@ def plans_run_cmd(
     max_loops: int,
     no_checkpoint: bool,
     dry_run: bool,
+    reviewer_backend: str,
 ) -> None:
     project_root = Path(root).resolve()
     plan = _resolve_plan_or_die(project_root, plan_id)
@@ -976,6 +1011,9 @@ def plans_run_cmd(
         f"loc_budget={slice_obj.loc_budget})",
         err=True,
     )
+    reviewer_llm = _resolve_reviewer_backend(reviewer_backend, llm=llm)
+    if reviewer_backend.lower() == "cursor":
+        click.echo("info: reviewer=cursor (Cursor receives §9 evidence only)", err=True)
     run_graph(
         user_input=slice_to_user_input(plan, slice_obj),
         project_root=str(project_root),
@@ -986,6 +1024,7 @@ def plans_run_cmd(
         llm=llm,
         thread_id=thread_id,
         worker_name=worker_name,
+        reviewer_llm=reviewer_llm,
     )
 
 
