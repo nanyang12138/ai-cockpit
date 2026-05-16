@@ -11,4 +11,15 @@ from ai_cockpit.workers.aider_worker import AiderWorker
 from ai_cockpit.workers.base import Worker, WorkerRequest, WorkerResult
 from ai_cockpit.workers.stub_worker import StubWorker
 
-__all__ = ["Worker", "WorkerRequest", "WorkerResult", "StubWorker", "AiderWorker"]
+__all__ = [
+    "Worker", "WorkerRequest", "WorkerResult",
+    "StubWorker", "AiderWorker", "CursorWorker",
+]
+
+
+def __getattr__(name: str):
+    if name == "CursorWorker":
+        from ai_cockpit.cursor_adapter.worker import CursorWorker
+
+        return CursorWorker
+    raise AttributeError(f"module 'ai_cockpit.workers' has no attribute {name!r}")

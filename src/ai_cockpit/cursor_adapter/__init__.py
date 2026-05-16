@@ -16,6 +16,11 @@ from ai_cockpit.cursor_adapter.planner import (
     CursorSessionFactory,
     CursorUnavailableError,
 )
+from ai_cockpit.cursor_adapter.worker import (
+    CursorWorker,
+    CursorWorkerSession,
+    CursorWorkerSessionFactory,
+)
 
 __all__ = [
     "DEFAULT_CANDIDATE_BINARIES",
@@ -24,5 +29,8 @@ __all__ = [
     "CursorPlannerSession",
     "CursorSessionFactory",
     "CursorUnavailableError",
+    "CursorWorker",
+    "CursorWorkerSession",
+    "CursorWorkerSessionFactory",
     "probe_cursor_adapter",
 ]

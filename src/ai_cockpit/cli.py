@@ -109,6 +109,9 @@ _AIDER_RUNTIME_ALLOWLIST_PREFIXES: tuple[str, ...] = (
     ".ai-cockpit/history/",
 )
 
+# Workers that may modify files; share the dirty-tree guard + --apply gate.
+_APPLY_CAPABLE_WORKERS: tuple[str, ...] = ("aider", "cursor")
+
 
 def _dirty_paths_outside_aider_allowlist(project_root: str) -> list[str]:
     """Return uncommitted-modification paths that are NOT aider runtime artifacts.
@@ -141,14 +144,14 @@ def _dirty_paths_outside_aider_allowlist(project_root: str) -> list[str]:
     return paths
 
 
-def _enforce_dirty_tree_precheck(project_root: str) -> None:
-    """A.7: refuse ``--worker aider --apply`` on a dirty working tree."""
+def _enforce_dirty_tree_precheck(project_root: str, *, worker_name: str = "aider") -> None:
+    """A.7 / B.10c: refuse ``--worker {aider,cursor} --apply`` on a dirty tree."""
     dirty = _dirty_paths_outside_aider_allowlist(project_root)
     if not dirty:
         return
     click.echo(
-        "error: refusing --worker aider --apply on a dirty working tree. "
-        "The following uncommitted paths are not aider runtime artifacts:",
+        f"error: refusing --worker {worker_name} --apply on a dirty working tree. "
+        "The following uncommitted paths are not aider/cursor runtime artifacts:",
         err=True,
     )
     for path in dirty:
@@ -159,8 +162,8 @@ def _enforce_dirty_tree_precheck(project_root: str) -> None:
         err=True,
     )
     raise click.UsageError(
-        f"dirty working tree blocks --worker aider --apply "
-        f"({len(dirty)} path(s) outside aider runtime allow-list)"
+        f"dirty working tree blocks --worker {worker_name} --apply "
+        f"({len(dirty)} path(s) outside runtime allow-list)"
     )
 
 
@@ -328,12 +331,13 @@ def _apply_workflow_defaults(
     "worker_name",
     default="stub",
     show_default=True,
-    type=click.Choice(["stub", "aider"], case_sensitive=False),
+    type=click.Choice(["stub", "aider", "cursor"], case_sensitive=False),
     help=(
         "Which worker executes the implementation slice. 'stub' (default) "
-        "never modifies the working tree. 'aider' spawns the aider CLI; "
-        "to actually let aider write files you must also pass --apply, "
-        "otherwise the worker only previews the message it would send."
+        "never modifies the working tree. 'aider' spawns the aider CLI. "
+        "'cursor' (B.10c) drives the Cursor CLI as a worker. For aider/cursor "
+        "you must also pass --apply, otherwise the worker only previews the "
+        "task package it would send."
     ),
 )
 @click.option(
@@ -342,9 +346,10 @@ def _apply_workflow_defaults(
     is_flag=True,
     default=False,
     help=(
-        "For --worker aider: opt in to actually invoking aider so it can "
-        "modify files. Without --apply, aider is never spawned (preview-only). "
-        "Ignored when --worker stub. Mutually exclusive with --dry-run."
+        "For --worker {aider,cursor}: opt in to actually invoking the worker "
+        "so it can modify files. Without --apply the worker is never spawned "
+        "(preview-only). Ignored for --worker stub. Mutually exclusive with "
+        "--dry-run."
     ),
 )
 @click.option(
@@ -391,18 +396,24 @@ def run_cmd(
         raise click.UsageError("--resume requires --thread-id")
 
     worker_name = (worker_name or "stub").lower()
-    if apply and worker_name != "aider":
-        raise click.UsageError("--apply is only meaningful with --worker aider")
+    if apply and worker_name not in _APPLY_CAPABLE_WORKERS:
+        raise click.UsageError(
+            "--apply is only meaningful with --worker aider|cursor"
+        )
     if apply and dry_run:
         raise click.UsageError("--apply and --dry-run are mutually exclusive")
-    if allow_dirty_tree and not (worker_name == "aider" and apply):
+    if allow_dirty_tree and not (
+        worker_name in _APPLY_CAPABLE_WORKERS and apply
+    ):
         click.echo(
-            "warning: --allow-dirty-tree only affects --worker aider --apply; "
-            "ignored for the current invocation.",
+            "warning: --allow-dirty-tree only affects --worker aider|cursor "
+            "--apply; ignored for the current invocation.",
             err=True,
         )
-    # Safety default: aider worker is preview-only unless --apply is set.
-    effective_dry_run = dry_run or (worker_name == "aider" and not apply)
+    # Safety default: aider/cursor workers are preview-only unless --apply.
+    effective_dry_run = dry_run or (
+        worker_name in _APPLY_CAPABLE_WORKERS and not apply
+    )
 
     user_input = " ".join(idea).strip() if idea else ""
     if not resume and not user_input:
@@ -410,8 +421,12 @@ def run_cmd(
 
     project_root = str(Path(root).resolve())
 
-    if worker_name == "aider" and apply and not allow_dirty_tree:
-        _enforce_dirty_tree_precheck(project_root)
+    if (
+        worker_name in _APPLY_CAPABLE_WORKERS
+        and apply
+        and not allow_dirty_tree
+    ):
+        _enforce_dirty_tree_precheck(project_root, worker_name=worker_name)
 
     workflow = _resolve_workflow(project_root, workflow_path)
     mode, max_loops, test_commands = _apply_workflow_defaults(
@@ -442,17 +457,18 @@ def run_cmd(
     elif effective_thread_id is not None:
         click.echo(f"info: persisting run as thread {effective_thread_id}", err=True)
 
-    if worker_name == "aider":
+    if worker_name in _APPLY_CAPABLE_WORKERS:
         if apply:
             click.echo(
-                "info: worker=aider --apply: aider WILL be invoked and may modify "
-                "your working tree.",
+                f"info: worker={worker_name} --apply: {worker_name} WILL be "
+                "invoked and may modify your working tree.",
                 err=True,
             )
         else:
             click.echo(
-                "info: worker=aider preview-only (no --apply): aider will NOT be "
-                "spawned; pass --apply to let it edit files.",
+                f"info: worker={worker_name} preview-only (no --apply): "
+                f"{worker_name} will NOT be spawned; pass --apply to let it "
+                "edit files.",
                 err=True,
             )
 
@@ -899,9 +915,9 @@ def _resolve_plan_or_die(project_root: Path, plan_id: str) -> Plan:
 @click.option("--root", "root", default=".", show_default=True,
               type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True))
 @click.option("--worker", "worker_name", default="stub", show_default=True,
-              type=click.Choice(["stub", "aider"], case_sensitive=False))
+              type=click.Choice(["stub", "aider", "cursor"], case_sensitive=False))
 @click.option("--apply", "apply", is_flag=True, default=False,
-              help="With --worker aider, opt in to letting aider edit files.")
+              help="With --worker aider|cursor, opt in to letting the worker edit files.")
 @click.option("--llm", "llm_mode", default="none", show_default=True,
               type=click.Choice(["none", "auto", "anthropic", "openai"],
                                 case_sensitive=False))
@@ -933,13 +949,17 @@ def plans_run_cmd(
         raise click.ClickException(str(exc)) from exc
 
     worker_name = (worker_name or "stub").lower()
-    if apply and worker_name != "aider":
-        raise click.UsageError("--apply is only meaningful with --worker aider")
+    if apply and worker_name not in _APPLY_CAPABLE_WORKERS:
+        raise click.UsageError(
+            "--apply is only meaningful with --worker aider|cursor"
+        )
     if apply and dry_run:
         raise click.UsageError("--apply and --dry-run are mutually exclusive")
-    effective_dry_run = dry_run or (worker_name == "aider" and not apply)
-    if worker_name == "aider" and apply:
-        _enforce_dirty_tree_precheck(str(project_root))
+    effective_dry_run = dry_run or (
+        worker_name in _APPLY_CAPABLE_WORKERS and not apply
+    )
+    if worker_name in _APPLY_CAPABLE_WORKERS and apply:
+        _enforce_dirty_tree_precheck(str(project_root), worker_name=worker_name)
 
     llm = build_llm(llm_mode)
     if llm_mode != "none" and llm is None:
