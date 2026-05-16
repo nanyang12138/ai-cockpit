@@ -194,6 +194,21 @@ Explicit CLI flags (`--mode`, `--max-loops`, `--test-command`) always
 win over YAML defaults. YAML node order MUST match
 `src/ai_cockpit/graph.py`; the loader refuses to start otherwise.
 
+Discover and pre-flight workflows from the CLI (v0.3 A.4):
+
+```bash
+ai-cockpit workflows list                          # tab-separated table
+ai-cockpit workflows validate .ai-cockpit/workflows/bug-fix.yaml
+```
+
+`workflows list` prints `name | mode | max_loops | test_commands_count`
+for each `*.yaml` / `*.yml` under `<root>/.ai-cockpit/workflows/` and
+flags malformed files inline (per-row `INVALID:` marker, not a hard
+error) so a single broken file doesn't hide healthy ones.
+`workflows validate PATH` loads through the same `load_workflow`
+parser the run loop uses and prints `OK` (exit 0) or the specific
+`WorkflowError` (non-zero exit), suitable for CI pre-flight.
+
 A runnable §15.1 end-to-end demo (deliberately broken calc + failing
 pytest, fixed by aider via the `bug-fix.yaml` workflow) lives under
 [`examples/broken_calc/`](examples/broken_calc/README.md).

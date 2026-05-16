@@ -586,5 +586,82 @@ def memory_accept_cmd(suggestion_id: str, root: str) -> None:
     click.echo(f"applied {suggestion_id} -> {target}")
 
 
+# ---------------------------------------------------------------------------
+# workflows subgroup (A.4)
+# ---------------------------------------------------------------------------
+
+
+@main.group(
+    name="workflows",
+    help="Inspect and validate workflow YAMLs under .ai-cockpit/workflows/.",
+)
+def workflows_group() -> None:
+    """Workflow YAML discovery + pre-flight validation subcommands."""
+
+
+_WORKFLOWS_ROOT_OPTION = click.option(
+    "--root",
+    "root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+    help="Project root containing .ai-cockpit/workflows/.",
+)
+
+
+def _iter_workflow_yaml_paths(project_root: str) -> list[Path]:
+    """Return YAML files under <root>/.ai-cockpit/workflows/ in sorted order."""
+    workflows_dir = Path(project_root) / ".ai-cockpit" / "workflows"
+    if not workflows_dir.is_dir():
+        return []
+    paths: list[Path] = []
+    for ext in ("*.yaml", "*.yml"):
+        paths.extend(workflows_dir.glob(ext))
+    return sorted(paths)
+
+
+@workflows_group.command(
+    name="list",
+    help="List workflow YAMLs with their mode, max_loops, and test-command count.",
+)
+@_WORKFLOWS_ROOT_OPTION
+def workflows_list_cmd(root: str) -> None:
+    project_root = str(Path(root).resolve())
+    paths = _iter_workflow_yaml_paths(project_root)
+    if not paths:
+        click.echo("no workflows found")
+        return
+    click.echo("name\tmode\tmax_loops\ttest_commands_count")
+    for path in paths:
+        try:
+            wf = load_workflow(path)
+            test_commands_count: int | str = len(wf.verifier_test_commands())
+            mode = wf.mode
+            max_loops: int | str = wf.max_loops
+            name = wf.name
+        except WorkflowError as exc:
+            name = path.stem
+            mode = "?"
+            max_loops = "?"
+            test_commands_count = f"INVALID: {exc}"
+        click.echo(f"{name}\t{mode}\t{max_loops}\t{test_commands_count}")
+
+
+@workflows_group.command(
+    name="validate",
+    help="Load a workflow YAML and report 'OK' or a specific WorkflowError.",
+)
+@click.argument(
+    "path",
+    type=click.Path(exists=True, dir_okay=False, resolve_path=True),
+)
+def workflows_validate_cmd(path: str) -> None:
+    try:
+        load_workflow(path)
+    except WorkflowError as exc:
+        raise click.ClickException(str(exc)) from exc
+    click.echo("OK")
+
+
 if __name__ == "__main__":
     main(prog_name="ai-cockpit", standalone_mode=True, args=sys.argv[1:])
