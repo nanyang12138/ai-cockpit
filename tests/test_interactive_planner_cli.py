@@ -33,7 +33,10 @@ def test_plan_abort_writes_nothing(tmp_path: Path) -> None:
     assert not (tmp_path / "docs" / "plans").exists()
 
 
-def test_plan_cursor_backend_is_explicitly_deferred(tmp_path: Path) -> None:
+def test_plan_cursor_backend_falls_back_when_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("PATH", str(tmp_path))
     result = CliRunner().invoke(
         cli_main,
         [
@@ -50,7 +53,8 @@ def test_plan_cursor_backend_is_explicitly_deferred(tmp_path: Path) -> None:
     )
 
     assert result.exit_code != 0
-    assert "backend 'cursor' is not implemented yet" in result.output
+    assert "Cursor CLI not available" in result.output
+    assert "--backend builtin" in result.output
 
 
 def test_plan_save_writes_fixture_plan(tmp_path: Path) -> None:

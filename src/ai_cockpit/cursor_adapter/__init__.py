@@ -10,9 +10,19 @@ from ai_cockpit.cursor_adapter.discovery import (
     CursorAdapterStatus,
     probe_cursor_adapter,
 )
+from ai_cockpit.cursor_adapter.planner import (
+    CursorPlannerBackend,
+    CursorPlannerSession,
+    CursorSessionFactory,
+    CursorUnavailableError,
+)
 
 __all__ = [
     "DEFAULT_CANDIDATE_BINARIES",
     "CursorAdapterStatus",
+    "CursorPlannerBackend",
+    "CursorPlannerSession",
+    "CursorSessionFactory",
+    "CursorUnavailableError",
     "probe_cursor_adapter",
 ]
