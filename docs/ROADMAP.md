@@ -440,8 +440,20 @@ optional B.10e Cursor Writer backend.
   values plus tri-state flags for `--print --output-format=json`,
   `--yolo`/`--trust`, and `--resume`/`session`. All tests use fake
   binaries + an injected runner; the real Cursor CLI is never called.
-- B.10b–B.10e source work remains NOT authorized until the user
-  explicitly says "open-gate B.10b" (or equivalent).
+- **B.10b — delivered 2026-05-16.** `ai-cockpit plan ... --backend
+  cursor` plugs Cursor into the B.9 planner protocol via
+  `CursorPlannerBackend`. The bridge is interactive-first: each
+  user turn flows through an injectable `CursorPlannerSession`
+  (default `_SubprocessSession` over `Popen --mode plan`); replies
+  are parsed by `parse_json_response` and validated through the
+  B.6 `PlanDraft` schema before becoming the active draft. Source
+  writes from the planner are forbidden; saves still go through
+  `/save` + `save_plan_atomic`. When no Cursor binary is on `PATH`
+  the backend raises `CursorUnavailableError` suggesting
+  `--backend builtin`. Tests inject a fake session — the real
+  Cursor CLI is never spawned.
+- B.10c–B.10e source work remains NOT authorized until the user
+  explicitly says "open-gate B.10c" (or equivalent).
 
 ---
 

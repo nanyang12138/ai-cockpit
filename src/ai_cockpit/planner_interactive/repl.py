@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import click
 
@@ -17,6 +18,11 @@ from ai_cockpit.planner_interactive.types import (
     default_plan_path,
     save_plan_atomic,
 )
+
+if TYPE_CHECKING:
+    from ai_cockpit.cursor_adapter import CursorSessionFactory
+
+_cursor_session_factory_override: CursorSessionFactory | None = None
 
 HELP_TEXT = """Commands:
   /help              Show this help.
@@ -40,10 +46,18 @@ def build_planner_backend(request: PlannerRequest) -> PlannerBackend:
     one-off B.9 adapter.
     """
 
+    if request.backend == "cursor":
+        from ai_cockpit.cursor_adapter import CursorPlannerBackend
+
+        cursor_backend = CursorPlannerBackend(
+            session_factory=_cursor_session_factory_override,
+        )
+        click.echo("info: planner backend enabled (cursor)", err=True)
+        return cursor_backend
     if request.backend != "builtin":
         raise click.ClickException(
             f"planner backend {request.backend!r} is not implemented yet; "
-            "use --backend builtin"
+            "use --backend builtin or --backend cursor"
         )
     backend = BuiltinPlannerBackend(llm_mode=request.llm_mode)
     if request.llm_mode != "none":
@@ -59,6 +73,15 @@ def build_planner_backend(request: PlannerRequest) -> PlannerBackend:
             click.echo(f"info: planner LLM enabled ({llm.name})", err=True)
         backend.bind_llm(llm)
     return backend
+
+
+def set_cursor_session_factory_for_tests(
+    factory: CursorSessionFactory | None,
+) -> None:
+    """Install a fake :class:`CursorPlannerSession` factory for tests."""
+
+    global _cursor_session_factory_override
+    _cursor_session_factory_override = factory
 
 
 def run_interactive_planner(
@@ -86,7 +109,14 @@ def run_interactive_planner(
         max_tool_bytes=max_tool_bytes,
     )
     planner = build_planner_backend(request)
-    response = planner.start(request)
+    try:
+        response = planner.start(request)
+    except Exception as exc:
+        from ai_cockpit.cursor_adapter import CursorUnavailableError
+
+        if isinstance(exc, CursorUnavailableError):
+            raise click.ClickException(str(exc)) from exc
+        raise
     click.echo(response.message)
     click.echo("Type /help for commands.")
 
