@@ -48,10 +48,15 @@ def make_coder_node(worker_name: str = "stub") -> Callable[[TaskState], TaskStat
             dry_run=bool(state.get("dry_run", False)),
         )
         result = worker.run(request)
-        return {
+        update: TaskState = {
             "coder_result": result.summary,
             "loop_count": int(state.get("loop_count", 0) or 0) + 1,
         }
+        if result.metrics:
+            # B.3: only the cost aggregator reads this; contract §9 forbids
+            # any other consumer (reviewer prompt, decision, cron).
+            update["metrics"] = dict(result.metrics)
+        return update
 
     return _coder_node
 

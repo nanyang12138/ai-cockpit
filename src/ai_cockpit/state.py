@@ -69,6 +69,9 @@ class TaskState(TypedDict, total=False):
     dry_run: bool
     test_commands: list[str]
 
+    # B.3: worker token/cost metrics; absent on pre-B.3 checkpoints (total=False).
+    metrics: dict[str, float]
+
 
 def initial_state(
     *,
