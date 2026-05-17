@@ -10,8 +10,7 @@ from __future__ import annotations
 
 
 def add(a: int, b: int) -> int:
-    # BUG: should return a + b. ai-cockpit's bug-fix workflow targets this.
-    return a - b
+    return a + b
 
 
 def mul(a: int, b: int) -> int:
