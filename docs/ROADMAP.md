@@ -280,11 +280,35 @@ to teach the planner to avoid criteria the worker can't satisfy.
 This touches the planner prompt, which is spec §9 sensitive — needs
 human review.
 
-### B.3 — real LLM cost dashboard
+### B.3 — real-LLM cost dashboard
 
-Aggregate the per-run token/cost data from A.3 across the
-checkpoint DB. Display via a `ai-cockpit cost` subcommand. Requires
-deciding privacy + retention semantics first.
+**Status: contract authored 2026-05-17 (queue item #6 of the
+v0.3 Cursor hardening + v0.4 startup window). Full design lives
+in `docs/B_3_CONTRACT.md`.** The locked CLI surface and stance
+(Q1–Q6, resolved with the user 2026-05-17 03:57 UTC):
+
+- **CLI:** `ai-cockpit cost [--root PATH] [--checkpoint-db PATH]
+  [--since DATE] [--format text|json]`. Read-only aggregator
+  over the existing LangGraph SqliteSaver checkpoint DB at
+  `.ai-cockpit/history/checkpoints.sqlite`. Reports per-thread
+  rows + grand total. Covers A.3 aider keys (`tokens_sent`,
+  `tokens_received`, `cost_message_usd`, `cost_session_usd`)
+  and B.10pty cursor keys (`input_tokens`, `output_tokens`,
+  `cache_read_tokens`, `cache_write_tokens`).
+- **Persistence change:** add one optional field
+  `metrics: dict[str, float]` to `TaskState` (`total=False`);
+  `make_coder_node` propagates `WorkerResult.metrics`. No DB
+  schema migration.
+- **No cost cap enforcement** (B.6 §3 Q6 precedent + B.5 Q5
+  exclusion). The B.5 Q4 (1) ≤ $1 check is operator-evaluated
+  against the printed total.
+- **Out of scope this gate:** cursor planner / reviewer
+  `last_usage` propagation (OQ-20, v0.5 candidate).
+
+Cron is pre-authorized for both queue #6 (contract, this PR)
+and queue #7 (implementation, ≤5 files / ≤350 net LOC on
+branch `cursor/v0_4-b3-impl`). One gate per tick; see
+`docs/B_3_CONTRACT.md` §11 + §15.
 
 ### B.4 — `--system-prompt FILE` override
 
