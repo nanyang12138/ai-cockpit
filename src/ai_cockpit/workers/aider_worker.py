@@ -36,19 +36,28 @@ from ai_cockpit.workers.base import WorkerRequest, WorkerResult
 
 log = logging.getLogger(__name__)
 
-# Aider prints rolling token / cost accounting on its own stdout lines, e.g.
-# ``Tokens: 6.7k sent, 316 received.`` followed by ``Cost: $0.04 message,
-# $0.04 session.`` (aider 0.86 ``aider.coders.base_coder``; see the §15.1
-# demo run archived in docs/V0_3_MILESTONES.md). A.3 surfaces those numbers
-# as structured ``metrics`` on WorkerResult. Silent fallback on regex miss.
+# Aider prints rolling token / cost accounting on its own stdout. The
+# canonical aider 0.86 form puts both halves on the SAME line, e.g.
+# ``Tokens: 13k sent, 173 received. Cost: $0.07 message, $0.07 session.``
+# (observed on the 2026-05-17 v0.4 exit-gate attempt and quoted verbatim
+# in docs/V0_3_MILESTONES.md "Cost / token signal"). Older / future
+# aider versions may split it across two lines; the regex must accept
+# both shapes. A.3 surfaces these numbers as structured ``metrics`` on
+# WorkerResult; silent fallback on regex miss.
+#
+# Both regexes deliberately drop the original line-anchor (``\s*$``
+# tail on TOKENS, ``^\s*`` head on COST) introduced in PR #35: they
+# rejected the single-line form aider actually emits, which silently
+# zeroed Q4(1) cost evidence on the first real gate run. The new
+# expressions remain MULTILINE only so ``^`` anchors the TOKENS half
+# at a line start (its real prefix).
 _TOKENS_RE = re.compile(
     r"^\s*Tokens:\s+(?P<sent>[\d.]+)(?P<sent_unit>[kKmM]?)\s+sent,\s+"
-    r"(?P<recv>[\d.]+)(?P<recv_unit>[kKmM]?)\s+received\.?\s*$",
+    r"(?P<recv>[\d.]+)(?P<recv_unit>[kKmM]?)\s+received\.?",
     re.MULTILINE,
 )
 _COST_RE = re.compile(
-    r"^\s*Cost:\s+\$(?P<msg>[\d.]+)\s+message,\s+\$(?P<session>[\d.]+)\s+session\.?",
-    re.MULTILINE,
+    r"Cost:\s+\$(?P<msg>[\d.]+)\s+message,\s+\$(?P<session>[\d.]+)\s+session\.?",
 )
 _TOKEN_UNIT_MULTIPLIER: dict[str, float] = {
     "": 1.0, "k": 1_000.0, "K": 1_000.0, "m": 1_000_000.0, "M": 1_000_000.0,
