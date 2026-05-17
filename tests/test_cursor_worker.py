@@ -1,7 +1,15 @@
-"""B.10c — Cursor worker backend tests; fake sessions, no real CLI."""
+"""B.10c — Cursor worker backend tests; fake sessions, no real CLI.
+
+B.10pty hardening tests at the bottom of this file pin the RPC default
+transport (``agent --print --yolo --output-format json``, default
+"agent" mode — no ``--mode`` flag — so Cursor can edit files). CI / cron
+VMs never invoke the real Cursor CLI.
+"""
 
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +22,7 @@ from ai_cockpit.cursor_adapter import (
     CursorWorker,
     CursorWorkerSession,
 )
+from ai_cockpit.cursor_adapter.planner import CursorSessionError, _RpcSession
 from ai_cockpit.workers import WorkerRequest
 
 
@@ -166,3 +175,88 @@ def test_cli_apply_requires_apply_capable_worker(tmp_path: Path) -> None:
     )
     assert result.exit_code != 0
     assert "--apply is only meaningful with --worker aider|cursor" in result.output
+
+
+# B.10pty hardening — default RPC transport ----------------------------------
+
+
+def _envelope(result: str, *, session_id: str = "sess-1",
+              is_error: bool = False) -> str:
+    return json.dumps({
+        "type": "result", "subtype": "error" if is_error else "success",
+        "is_error": is_error, "duration_ms": 100, "result": result,
+        "session_id": session_id, "request_id": "req-1",
+        "usage": {"inputTokens": 7, "outputTokens": 13,
+                  "cacheReadTokens": 0, "cacheWriteTokens": 0},
+    })
+
+
+def _ok(stdout: str, *, returncode: int = 0,
+        stderr: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=["cursor"], returncode=returncode, stdout=stdout, stderr=stderr,
+    )
+
+
+class _RecordingRunner:
+    def __init__(self, returns: list[subprocess.CompletedProcess[str]]) -> None:
+        self.returns = list(returns)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        self.calls.append(list(argv))
+        return self.returns.pop(0)
+
+
+def test_rpc_worker_happy_path_resume_chain_and_no_mode_flag() -> None:
+    runner = _RecordingRunner([
+        _ok(_envelope("Edited calc.py", session_id="sess-W")),
+        _ok(_envelope("Ran tests", session_id="sess-W")),
+    ])
+    session = _RpcSession("cursor", mode=None, runner=runner)
+    out1 = session.send("turn1")
+    out2 = session.send("turn2")
+    assert out1 == "Edited calc.py" and out2 == "Ran tests"
+    assert session.session_id == "sess-W"
+    assert session.last_usage == {
+        "input_tokens": 7, "output_tokens": 13,
+        "cache_read_tokens": 0, "cache_write_tokens": 0,
+    }
+    # Worker default mode is "agent" — no --mode flag at all.
+    for call in runner.calls:
+        assert call[1] == "agent"
+        assert "--mode" not in call
+        assert "--print" in call and "--yolo" in call
+    assert "--resume" not in runner.calls[0]
+    assert "--resume" in runner.calls[1] and "sess-W" in runner.calls[1]
+
+
+def test_rpc_worker_is_error_propagates_to_clean_summary() -> None:
+    runner = _RecordingRunner([_ok(_envelope("blocked", is_error=True))])
+
+    def factory(_r: WorkerRequest) -> CursorWorkerSession:
+        return _RpcSession("cursor", mode=None, runner=runner)
+
+    result = CursorWorker(session_factory=factory).run(_req())
+    assert "session call failed" in result.summary
+    assert "is_error" in result.summary or "blocked" in result.summary
+    assert "session transport failure" in result.notes
+
+
+def test_rpc_worker_nonzero_exit_propagates_to_clean_summary() -> None:
+    runner = _RecordingRunner([_ok("", returncode=2, stderr="boom")])
+
+    def factory(_r: WorkerRequest) -> CursorWorkerSession:
+        return _RpcSession("cursor", mode=None, runner=runner)
+
+    result = CursorWorker(session_factory=factory).run(_req())
+    assert "session call failed" in result.summary
+    assert "boom" in result.summary
+    assert "session transport failure" in result.notes
+
+
+def test_rpc_worker_raw_is_error_raises_session_error_directly() -> None:
+    runner = _RecordingRunner([_ok(_envelope("nope", is_error=True))])
+    session = _RpcSession("cursor", mode=None, runner=runner)
+    with pytest.raises(CursorSessionError):
+        session.send("hi")

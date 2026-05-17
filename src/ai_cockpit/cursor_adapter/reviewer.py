@@ -12,22 +12,18 @@ never spawned in CI.
 from __future__ import annotations
 
 import logging
-import shutil
-import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
-from ai_cockpit.cursor_adapter.discovery import (
-    DEFAULT_CANDIDATE_BINARIES,
-    probe_cursor_adapter,
+from ai_cockpit.cursor_adapter.planner import (
+    CursorUnavailableError,
+    _raise_unavailable,
+    _resolve_binary,
+    _RpcSession,
 )
-from ai_cockpit.cursor_adapter.planner import CursorUnavailableError
 
 log = logging.getLogger(__name__)
-
-_SESSION_READ_LIMIT_BYTES = 64_000
-_SUBPROCESS_TIMEOUT_SECONDS: float = 45.0
 
 
 class CursorReviewerSession(Protocol):
@@ -68,61 +64,17 @@ class CursorReviewerBackend:
                 pass
 
 
-class _SubprocessSession:
-    def __init__(self, binary_path: str, *, mode: str = "ask") -> None:
-        self._proc = subprocess.Popen(  # noqa: S603 - args are flag-only
-            [binary_path, "--mode", mode],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, bufsize=1,
-        )
-
-    def send(self, prompt: str) -> str:
-        if self._proc.stdin is None or self._proc.stdout is None:
-            raise RuntimeError("cursor subprocess has no stdio")
-        self._proc.stdin.write(prompt.rstrip("\n") + "\n")
-        self._proc.stdin.flush()
-        self._proc.stdin.close()
-        try:
-            out, _ = self._proc.communicate(timeout=_SUBPROCESS_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired as exc:
-            self._proc.kill()
-            raise RuntimeError(
-                f"cursor reviewer session timed out after {exc.timeout}s"
-            ) from exc
-        return out[:_SESSION_READ_LIMIT_BYTES]
-
-    def close(self) -> None:
-        if self._proc.poll() is None:
-            self._proc.terminate()
-            try:
-                self._proc.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
-
-
 def _default_session_factory(
     *, binary_override: str | None
 ) -> CursorReviewerSessionFactory:
-    def _resolve() -> str | None:
-        if binary_override:
-            return shutil.which(binary_override) or (
-                binary_override if "/" in binary_override else None
-            )
-        for name in DEFAULT_CANDIDATE_BINARIES:
-            path = shutil.which(name)
-            if path is not None:
-                return path
-        return None
-
     def factory() -> CursorReviewerSession:
-        path = _resolve()
+        path = _resolve_binary(binary_override)
         if path is None:
-            status = probe_cursor_adapter(binary_override=binary_override)
-            hints = "; ".join(status.errors) or "no Cursor CLI on PATH"
-            raise CursorUnavailableError(
-                f"Cursor CLI not available ({hints}); rerun with "
-                "--reviewer builtin or install the Cursor CLI."
+            _raise_unavailable(
+                binary_override,
+                "rerun with --reviewer builtin or install the Cursor CLI.",
             )
-        return _SubprocessSession(path)
+            raise AssertionError("unreachable")
+        return _RpcSession(path, mode="ask")
 
     return factory

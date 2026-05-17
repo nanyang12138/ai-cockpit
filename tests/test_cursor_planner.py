@@ -1,8 +1,16 @@
-"""B.10b — Cursor planner backend tests; fake sessions, no real CLI."""
+"""B.10b — Cursor planner backend tests; fake sessions, no real CLI.
+
+B.10pty hardening tests live at the bottom of this file: they exercise
+the new RPC default transport (``agent --print --yolo --output-format
+json [--mode <m>] [--resume <sid>] <prompt>``) using an injected fake
+``subprocess.run`` replacement. CI / cron VMs never invoke the real
+Cursor CLI.
+"""
 
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -15,6 +23,7 @@ from ai_cockpit.cursor_adapter import (
     CursorPlannerSession,
     CursorUnavailableError,
 )
+from ai_cockpit.cursor_adapter.planner import CursorSessionError, _RpcSession
 from ai_cockpit.planner_interactive.repl import set_cursor_session_factory_for_tests
 from ai_cockpit.planner_interactive.types import PlannerRequest
 
@@ -150,3 +159,88 @@ def test_cli_plan_cursor_backend_saves_with_fake_session(
     assert data["schema_version"] == 1
     assert data["plan_id"] == "ship-cursor-planner"
     assert "info: planner backend enabled (cursor)" in result.output
+
+
+# B.10pty hardening — default RPC transport ----------------------------------
+
+
+def _envelope(result: str, *, session_id: str = "sess-1",
+              is_error: bool = False) -> str:
+    return json.dumps({
+        "type": "result", "subtype": "error" if is_error else "success",
+        "is_error": is_error, "duration_ms": 100, "result": result,
+        "session_id": session_id, "request_id": "req-1",
+        "usage": {"inputTokens": 11, "outputTokens": 22,
+                  "cacheReadTokens": 0, "cacheWriteTokens": 0},
+    })
+
+
+def _ok(stdout: str, *, returncode: int = 0,
+        stderr: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=["cursor"], returncode=returncode, stdout=stdout, stderr=stderr,
+    )
+
+
+class _RecordingRunner:
+    def __init__(self, returns: list[subprocess.CompletedProcess[str]]) -> None:
+        self.returns = list(returns)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        self.calls.append(list(argv))
+        return self.returns.pop(0)
+
+
+def test_rpc_session_happy_path_resumes_and_validates_plan_draft() -> None:
+    plan_json = json.dumps(_VALID_PLAN)
+    runner = _RecordingRunner([
+        _ok(_envelope(plan_json, session_id="sess-A")),
+        _ok(_envelope(plan_json, session_id="sess-A")),
+    ])
+    session = _RpcSession("cursor", mode="plan", runner=runner)
+    out1 = session.send("first prompt")
+    assert json.loads(out1)["plan_id"] == "ship-cursor-planner"
+    assert session.session_id == "sess-A"
+    assert session.last_usage == {
+        "input_tokens": 11, "output_tokens": 22,
+        "cache_read_tokens": 0, "cache_write_tokens": 0,
+    }
+    out2 = session.send("second prompt")
+    assert json.loads(out2)["plan_id"] == "ship-cursor-planner"
+    # Argv shape: agent --print --yolo --output-format json --mode plan
+    # [+ --resume sess-A on turn 2] <prompt>.
+    for call in runner.calls:
+        assert call[1] == "agent"
+        assert "--print" in call and "--yolo" in call
+        assert "--output-format" in call and "json" in call
+        assert "--mode" in call and "plan" in call
+    assert "--resume" not in runner.calls[0]
+    assert runner.calls[0][-1] == "first prompt"
+    assert "--resume" in runner.calls[1] and "sess-A" in runner.calls[1]
+    assert runner.calls[1][-1] == "second prompt"
+    # PlanDraft schema accepts envelope.result decoded JSON (B.10b
+    # invariant restated under the new transport).
+    from ai_cockpit.planner_interactive.backends.builtin import _draft_from_payload
+
+    draft = _draft_from_payload(json.loads(out1))
+    draft.validate(max_slices=None)
+    assert draft.plan_id == "ship-cursor-planner"
+
+
+def test_rpc_session_is_error_raises_session_error() -> None:
+    runner = _RecordingRunner([_ok(_envelope("model refused", is_error=True))])
+    session = _RpcSession("cursor", mode="plan", runner=runner)
+    with pytest.raises(CursorSessionError) as info:
+        session.send("hi")
+    assert info.value.envelope["is_error"] is True
+    assert "model refused" in str(info.value)
+    # session_id NOT advanced when the turn errored.
+    assert session.session_id is None
+
+
+def test_rpc_session_nonzero_exit_raises_unavailable() -> None:
+    runner = _RecordingRunner([_ok("", returncode=2, stderr="auth failed")])
+    session = _RpcSession("cursor", mode="plan", runner=runner)
+    with pytest.raises(CursorUnavailableError, match="auth failed"):
+        session.send("hi")
