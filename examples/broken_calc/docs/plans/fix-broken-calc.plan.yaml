@@ -1,0 +1,32 @@
+schema_version: 1
+plan_id: fix-broken-calc
+created_at: '2026-05-17T14:30:21+00:00'
+idea: Fix the examples/broken_calc project so that pytest passes end-to-end
+acceptance_criteria:
+- Running 'pytest -v' in examples/broken_calc exits with code 0
+- All existing tests pass without being deleted or skipped
+- Only minimal changes are made to fix the bugs, not rewrite the project
+slices:
+- id: diagnose-and-fix
+  depends_on: []
+  title: Fix bugs in broken_calc so all pytest tests pass
+  why: The broken_calc example is intentionally broken to demonstrate AI Cockpit workflows.
+    We need to identify the bugs in the calculator implementation and fix them so
+    the test suite passes end-to-end.
+  scope_must:
+  - Read the test files to understand what behavior is expected
+  - Read the source files to identify the bugs
+  - Fix all bugs in the calculator source code so tests pass
+  - Ensure pytest -v exits with code 0
+  scope_out:
+  - Adding new tests beyond what already exists
+  - Refactoring code style or structure beyond what is needed to fix bugs
+  - Modifying test files to weaken assertions
+  dod:
+  - pytest -v passes with exit code 0
+  - No tests are deleted or skipped
+  - Only source (non-test) files are modified
+  files_budget: 4
+  loc_budget: 50
+  test_commands:
+  - pytest -v
