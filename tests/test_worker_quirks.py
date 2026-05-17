@@ -72,6 +72,39 @@ def test_testcmd_path_quirk_text_names_the_failure_mode() -> None:
     raise AssertionError("verifier.test_command_path quirk not found")
 
 
+def test_testcmd_path_quirk_survives_80_char_clip_with_concrete_example() -> None:
+    """Calibration regression from v0.4 gate attempt 4 (2026-05-17):
+
+    The original phrasing in PR #80 was 153 chars long. ``quirks_for()``
+    clipped it to 80, which fell exactly **before** the concrete
+    ``'pytest -v' not 'pytest examples/<dir> -v'`` pair. The planner
+    LLM then saw only the abstract head ("don't prefix paths with
+    project_root") and re-emitted the same wrong test_command.
+
+    This test pins that the clipped form the planner actually receives:
+
+    * is <= _HINT_CHAR_BUDGET (would otherwise still clip);
+    * contains the literal ``pytest -v`` good form; and
+    * contains a recognizable bad form (``examples/`` or ``<dir>``)
+      so the LLM sees a concrete pair, not an abstract directive.
+    """
+
+    hints = quirks_for("aider")
+    matching = [h for h in hints if "pytest -v" in h and "examples" in h]
+    assert matching, (
+        "expected the test_command quirk's clipped human_summary to retain "
+        "both the good form 'pytest -v' AND a recognizable bad form "
+        "involving 'examples/'; got: " + repr(hints)
+    )
+    assert len(matching[0]) <= 80, (
+        f"clipped hint exceeded _HINT_CHAR_BUDGET: {matching[0]!r}"
+    )
+    assert "…" not in matching[0], (
+        "clip ellipsis should not appear — hint should fit naturally; "
+        "got: " + repr(matching[0])
+    )
+
+
 def test_quirks_for_returns_lists_per_worker() -> None:
     assert quirks_for("aider")
     assert quirks_for("AIDER") == quirks_for("aider")
