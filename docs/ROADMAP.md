@@ -3,10 +3,16 @@
 Single source of truth for what ships next. v0.2 is fully complete
 (see `docs/V0_2_COMPLETION.md` for the exit-gate evidence). v0.3 has
 shipped the Aider worker, the filter for trivial memory suggestions,
-the `bug-fix.yaml` workflow, and the runnable `examples/broken_calc/`
-demo. From this point forward, every line of this document defines
-a self-contained micro-step a cron tick (or a single user session)
-can finish without ambiguity.
+the `bug-fix.yaml` workflow, the runnable `examples/broken_calc/`
+demo, **all 8/8 Section A cron-safe items (A.1–A.8, see below)**, and
+the required Section B set (B.6 multi-step planner + plan artifact;
+B.9 interactive planner builtin backend; B.10 Cursor-backed role
+backends for planner / worker / reviewer / writer; B.3 cost dashboard).
+The remaining open items are the v0.4 exit-gate run (B.5, operator-
+driven), and the B.2 / B.4 implementation gates (contracts authored,
+not yet user-open-gated). From this point forward, every line of this
+document defines a self-contained micro-step a cron tick (or a single
+user session) can finish without ambiguity.
 
 If anything below is unclear, STOP and ask the user — do not guess.
 
@@ -65,7 +71,11 @@ asserts each line is present. Existing 99 tests still green.
 **Files touched (budget):** ≤ 3 files (cli.py + 1 test + maybe a
 README line). ≤ 150 net LOC.
 
-### A.2 — `memory list` quality-of-life upgrades
+### A.2 — `memory list` quality-of-life upgrades  ✅ DONE (PR #34, 2026-05-16)
+
+Shipped: `cli.py::memory_list_cmd` now sorts by `created_at` desc, prefixes each
+row with an `age: <Nd Nh ago>` column, and prints a `total: N (done: A,
+ask_human: B)` summary line. Test fixture in `tests/test_memory_cli.py`.
 
 **Why:** the §15.1 demo run wrote a real `done` suggestion; users
 will accumulate dozens of these over weeks. The current `ai-cockpit
@@ -94,7 +104,12 @@ a fixture of three suggestions with different timestamps and decisions.
 **Files touched:** ≤ 3 (cli.py + tests/test_memory_cli.py + maybe a
 README line). ≤ 200 net LOC.
 
-### A.3 — token / cost extraction from aider stdout
+### A.3 — token / cost extraction from aider stdout  ✅ DONE (PR #35, 2026-05-16)
+
+Shipped: `WorkerResult.metrics: dict[str, float] | None` and
+`workers/aider_worker.py::_extract_aider_metrics` (regex-based, last-match-wins,
+silent fallback on regex miss). Keys: `tokens_sent`, `tokens_received`,
+`cost_message_usd`, `cost_session_usd`. Backs the B.3 cost dashboard.
 
 **Why:** PR #28's demo run showed `Tokens: 6.7k sent, 316 received.
 Cost: $0.04 message, $0.04 session.` lines in aider's stdout. Those
@@ -123,7 +138,14 @@ inputs. All existing aider-worker tests still pass.
 **Files touched:** ≤ 3 (aider_worker.py + tests/test_aider_worker.py
 + optional `base.py` if adding a metrics field). ≤ 200 net LOC.
 
-### A.4 — workflow YAML `list` + `validate` subcommands
+### A.4 — workflow YAML `list` + `validate` subcommands  ✅ DONE (PR #38, 2026-05-16)
+
+Shipped: `ai-cockpit workflows list` and `ai-cockpit workflows validate PATH`
+under a new `workflows` `click.Group`. List output is tab-separated
+`name | mode | max_loops | test_commands_count`; malformed files surface as
+inline `INVALID:` markers (not a hard failure) so one broken YAML doesn't
+hide healthy ones. README "Discover and pre-flight workflows from the CLI"
+documents the surface.
 
 **Why:** v0.3 micro-step #2 shipped a second workflow. As more land,
 discoverability and pre-flight validation matter.
@@ -150,7 +172,14 @@ subcommand. The existing repo's two YAMLs (`idea-to-mvp.yaml` and
 **Files touched:** ≤ 3 (cli.py + tests/test_workflow.py + README).
 ≤ 250 net LOC.
 
-### A.5 — anti-deception edge-case tests (spec §9 hardening)
+### A.5 — anti-deception edge-case tests (spec §9 hardening)  ✅ DONE (PR #39, 2026-05-16)
+
+Shipped: three new mock-LLM tests in `tests/test_llm_planner_reviewer.py`
+(`test_empty_commands_with_upbeat_non_json_reply_still_escalates`,
+`test_reviewer_prompt_excludes_verdict_lookalike_via_real_provider`,
+`test_planner_falls_back_to_stub_on_empty_acceptance_criteria`). No production
+code path was changed. B.6c later added a 5th anti-deception test pinning
+that `.plan.yaml` content cannot leak into the reviewer prompt.
 
 **Why:** the four mandatory mock-LLM anti-deception tests cover the
 canonical cases (empty diff with upbeat coder, etc.). The §15.1
@@ -180,7 +209,13 @@ open a separate bug PR — do not silently fix it as part of this step.
 
 **Files touched:** ≤ 1 (test file only). ≤ 200 net LOC.
 
-### A.7 — pre-run dirty-tree pre-check (surfaced by A.1 milestone)
+### A.7 — pre-run dirty-tree pre-check (surfaced by A.1 milestone)  ✅ DONE (PR #41, 2026-05-16)
+
+Shipped: `--worker aider --apply` now inspects `git status --porcelain` before
+spawning aider and refuses to proceed when there are uncommitted modifications
+outside the allow-list (`.aider.*`, `.ai-cockpit/suggestions/`,
+`.ai-cockpit/history/`). Tests in `tests/test_dirty_tree_precheck.py` simulate
+the dirty-tree case via tmp_path git repos. Bypass with `--allow-dirty-tree`.
 
 Originally B.7 — promoted into the cron-safe queue by the 2026-05-16
 24h-autonomous authorization (see `V0_3_STATUS.md`). Self-contained
@@ -204,7 +239,12 @@ assert refusal vs `--allow-dirty-tree` succeeds.
 
 **Files touched:** ≤ 3 (cli.py + tests + README). ≤ 200 net LOC.
 
-### A.8 — gitignore `.aider.*` runtime artifacts
+### A.8 — gitignore `.aider.*` runtime artifacts  ✅ DONE (PR #42, 2026-05-16)
+
+Shipped: `.gitignore` now excludes `.aider.chat.history.md`,
+`.aider.input.history`, `.aider.tags.cache.v4/`, and the generic `.aider*`
+glob. README "Aider runtime artifacts are gitignored (A.8)" documents why
+these are aider's session state, not ai-cockpit output.
 
 Originally B.8 — promoted into the cron-safe queue by the
 2026-05-16 24h authorization. Trivial.
@@ -222,7 +262,12 @@ not list `.aider.*` paths. Existing tests still green.
 
 **Files touched:** ≤ 2 (.gitignore + README). ≤ 20 net LOC.
 
-### A.6 — `docs/ARCHITECTURE.md`
+### A.6 — `docs/ARCHITECTURE.md`  ✅ DONE (PR #40, 2026-05-16)
+
+Shipped: `docs/ARCHITECTURE.md` (~298 lines) covering the graph, `TaskState`
+field ownership, worker protocol, LLM provider abstraction + APIM bridge,
+memory pipeline, workflow YAML, and the three-layer spec §9 evidence flow.
+README "Project Layout" links to it.
 
 **Why:** future contributors (including a future cron-self) need a
 single document explaining how the pieces fit together without
