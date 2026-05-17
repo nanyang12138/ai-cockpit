@@ -457,8 +457,9 @@ optional B.10e Cursor Writer backend.
   the backend raises `CursorUnavailableError` suggesting
   `--backend builtin`. Tests inject a fake session — the real
   Cursor CLI is never spawned.
-- B.10c–B.10e source work remains NOT authorized until the user
-  explicitly says "open-gate B.10c" (or equivalent).
+- **B.10c — delivered 2026-05-16.** `--worker cursor` ships `CursorWorker` (controlled task package, self-report semantics).
+- **B.10d — delivered 2026-05-16.** `--reviewer cursor` ships `CursorReviewerBackend` on the §9 evidence-only prompt path.
+- **B.10e — delivered 2026-05-17.** `CursorWriterBackend` ships a draft-only writer (PR description / run summary / status report); spec §12 outbound-comms boundary pinned by an AST import scan.
 
 ---
 
