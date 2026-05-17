@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from pathlib import Path
 
 from ai_cockpit.planner_interactive.tools import PlannerTool
 
@@ -45,6 +46,33 @@ PLAN_DRAFT_SCHEMA: dict[str, object] = {
 }
 
 
+def _format_verifier_cwd_block(verifier_cwd: str | None) -> str | None:
+    """Render the explicit verifier-cwd context block.
+
+    Bug F (2026-05-17 v0.4 gate attempt 7): the B.2 quirk hint was
+    receiver-truncated by claude-opus-4-6 in favour of its strong
+    "tests run from repo root" prior. A 78-char one-liner quirk
+    cannot reliably overcome that prior; supplying the **literal
+    cwd path** as a concrete factual block does.
+
+    Default ``None`` keeps existing call sites byte-identical.
+    """
+
+    if not verifier_cwd:
+        return None
+    cwd_str = str(verifier_cwd).strip()
+    if not cwd_str:
+        return None
+    return (
+        "Verifier execution context (FACTUAL, not a suggestion):\n"
+        f"  Each test_command will run with cwd = {cwd_str}\n"
+        "  Emit shell commands assuming THIS exact working directory.\n"
+        "  Use paths relative to that cwd (or no path at all if the\n"
+        "  target is the cwd itself, e.g. 'pytest -v' not\n"
+        f"  'pytest {Path(cwd_str).name}/ -v')."
+    )
+
+
 def build_planner_messages(
     *,
     idea: str,
@@ -55,15 +83,21 @@ def build_planner_messages(
     worker_hints: list[str] | None = None,
     worker_name: str | None = None,
     system_override: str | None = None,
+    verifier_cwd: str | None = None,
 ) -> tuple[str, str]:
     """Return ``(system, user)`` for a planner LLM call.
 
     ``worker_hints`` (B.2) is an optional list of human-summary strings
-    from ``quirks_for(worker_name)``. The interactive REPL wiring
-    (CLI ``ai-cockpit plan --worker <name>``) is a follow-up gate.
+    from ``quirks_for(worker_name)``.
 
     ``system_override`` (B.4): replaces :data:`PLANNER_SYSTEM` verbatim
     when supplied; CLI loader validates first.
+
+    ``verifier_cwd`` (Bug F, 2026-05-17): a literal absolute path
+    string for where ``plans run`` will execute each ``test_command``.
+    When supplied, a factual block is prepended to the user message so
+    the LLM cannot infer a different cwd from natural-language framing.
+    Pass ``str(project_root.resolve())`` from the CLI layer.
 
     Defaults keep every existing call site byte-identical.
     """
@@ -80,6 +114,9 @@ def build_planner_messages(
         "Read-only planner tools available (descriptive list only; you "
         f"cannot invoke them in this turn):\n{inventory}",
     ]
+    cwd_block = _format_verifier_cwd_block(verifier_cwd)
+    if cwd_block is not None:
+        parts.append(cwd_block)
     if current_draft is not None:
         parts.append(
             "Current draft (revise rather than rewrite from scratch):\n"

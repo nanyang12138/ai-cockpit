@@ -80,6 +80,13 @@ class BuiltinPlannerBackend:
         from ai_cockpit.workers.quirks import quirks_for
 
         worker_name = self._request.worker_name
+        # Bug F (2026-05-17 v0.4 attempt 7): supply the literal verifier
+        # cwd so the planner LLM cannot override it with its
+        # "tests run from repo root" prior.
+        try:
+            verifier_cwd = str(Path(self._request.project_root).resolve())
+        except (OSError, RuntimeError):
+            verifier_cwd = str(self._request.project_root)
         system, user = build_planner_messages(
             idea=self._request.idea,
             memory_context=self._request.memory_context,
@@ -88,6 +95,7 @@ class BuiltinPlannerBackend:
             current_draft=(self._draft.to_dict() if self._draft else None),
             worker_hints=quirks_for(worker_name),
             worker_name=worker_name,
+            verifier_cwd=verifier_cwd,
         )
         try:
             raw = self._llm.complete(system=system, user=user)

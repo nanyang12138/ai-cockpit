@@ -105,8 +105,8 @@ _CURSOR_WORKSPACE_SCAN = WorkerQuirk(
 _TESTCMD_PATH_RELATIVE_TO_CWD = WorkerQuirk(
     id="verifier.test_command_path_relative_to_root",
     human_summary=(
-        "test_commands cwd=root; write 'pytest -v' not "
-        "'pytest examples/<dir> -v'."
+        "test_command's cwd = --root dir; emit 'pytest -v' "
+        "not 'pytest <dir>/ -v'."
     ),
     criteria_to_avoid=(
         "pytest <project_root_subdir> -v",
