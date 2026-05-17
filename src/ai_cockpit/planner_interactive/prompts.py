@@ -54,13 +54,18 @@ def build_planner_messages(
     current_draft: object | None = None,
     worker_hints: list[str] | None = None,
     worker_name: str | None = None,
+    system_override: str | None = None,
 ) -> tuple[str, str]:
     """Return ``(system, user)`` for a planner LLM call.
 
     ``worker_hints`` (B.2) is an optional list of human-summary strings
-    from ``quirks_for(worker_name)``. Default ``None`` keeps every
-    existing call site byte-identical; the interactive REPL wiring
+    from ``quirks_for(worker_name)``. The interactive REPL wiring
     (CLI ``ai-cockpit plan --worker <name>``) is a follow-up gate.
+
+    ``system_override`` (B.4): replaces :data:`PLANNER_SYSTEM` verbatim
+    when supplied; CLI loader validates first.
+
+    Defaults keep every existing call site byte-identical.
     """
 
     from ai_cockpit.workers.quirks import format_worker_hints_block
@@ -89,4 +94,5 @@ def build_planner_messages(
         "Reply with JSON exactly matching this schema (no commentary):\n"
         f"{json.dumps(PLAN_DRAFT_SCHEMA, indent=2)}"
     )
-    return PLANNER_SYSTEM, "\n\n".join(parts)
+    system = system_override if system_override is not None else PLANNER_SYSTEM
+    return system, "\n\n".join(parts)

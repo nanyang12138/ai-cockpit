@@ -94,9 +94,16 @@ def _normalize_risk(value: object) -> str:
     return "medium"
 
 
-def _llm_review(llm: LLMProvider, state: TaskState) -> ReviewResult | None:
+def _llm_review(
+    llm: LLMProvider,
+    state: TaskState,
+    *,
+    system_override: str | None = None,
+) -> ReviewResult | None:
     evidence = build_reviewer_evidence(dict(state))
-    system, user = build_reviewer_messages(evidence)
+    system, user = build_reviewer_messages(
+        evidence, system_override=system_override
+    )
     try:
         raw = llm.complete(system=system, user=user)
     except Exception as exc:  # noqa: BLE001 — LLM call site, must not crash the run
@@ -152,13 +159,22 @@ def _enforce_hard_rules(review: ReviewResult, state: TaskState) -> ReviewResult:
     }
 
 
-def make_reviewer_node(llm: LLMProvider | None) -> Callable[[TaskState], TaskState]:
-    """Return a reviewer node bound to an optional LLM provider."""
+def make_reviewer_node(
+    llm: LLMProvider | None,
+    *,
+    system_override: str | None = None,
+) -> Callable[[TaskState], TaskState]:
+    """Return a reviewer node bound to an optional LLM provider.
+
+    ``system_override`` (B.4) is the pre-validated reviewer system
+    prompt body. The reviewer-evidence dict (user message) is NOT
+    overridable — §9 hard boundary.
+    """
 
     def reviewer_node(state: TaskState) -> TaskState:
         review: ReviewResult | None = None
         if llm is not None:
-            review = _llm_review(llm, state)
+            review = _llm_review(llm, state, system_override=system_override)
         if review is None:
             review = _deterministic_review(state)
 
