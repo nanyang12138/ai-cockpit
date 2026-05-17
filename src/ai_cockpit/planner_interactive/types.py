@@ -130,7 +130,16 @@ class PlanDraft:
 
 @dataclass(frozen=True)
 class PlannerRequest:
-    """Initial request passed from the CLI into the planner REPL."""
+    """Initial request passed from the CLI into the planner REPL.
+
+    ``worker_name`` (Bug E fix, 2026-05-17 v0.4 gate attempt 6): the
+    intended downstream apply-capable worker (typically ``aider`` or
+    ``cursor``). When non-empty the builtin backend forwards
+    ``quirks_for(worker_name)`` into ``build_planner_messages`` so
+    the planner LLM sees B.2 hint bullets. ``None`` keeps the
+    pre-B.2 message shape — backward-compatible with B.9 contract
+    Q1 ("interactive planner does not know which worker by default").
+    """
 
     idea: str
     project_root: Path
@@ -141,6 +150,7 @@ class PlannerRequest:
     max_slices: int | None
     max_turns: int
     max_tool_bytes: int
+    worker_name: str | None = None
 
 
 @dataclass(frozen=True)

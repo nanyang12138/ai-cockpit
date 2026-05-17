@@ -54,7 +54,7 @@ class _ScriptedLLM:
         return self._replies.pop(0) if self._replies else ""
 
 
-def _request(root: Path) -> PlannerRequest:
+def _request(root: Path, *, worker_name: str | None = None) -> PlannerRequest:
     return PlannerRequest(
         idea="ship feature",
         project_root=root,
@@ -65,6 +65,7 @@ def _request(root: Path) -> PlannerRequest:
         max_slices=None,
         max_turns=12,
         max_tool_bytes=12_000,
+        worker_name=worker_name,
     )
 
 
@@ -164,6 +165,56 @@ def test_respond_revises_draft_and_save_writes_yaml(tmp_path: Path) -> None:
     assert data["schema_version"] == 1
     assert data["plan_id"] == "revised-plan"
     assert data["slices"][0]["loc_budget"] == 150
+
+
+def test_builtin_backend_injects_worker_quirks_when_worker_name_set(
+    tmp_path: Path,
+) -> None:
+    """Bug E regression (2026-05-17 v0.4 gate attempt 6):
+
+    ``ai-cockpit plan --worker aider`` flows ``worker_name="aider"`` into
+    ``PlannerRequest`` which the builtin backend MUST forward into
+    ``build_planner_messages`` so the user message gains a "Worker quirks
+    to design around" block. Without this wiring (prior to PR #82), B.2
+    catalog growth was theatrical for the most common interactive
+    planning surface — exactly what the 2026-05-17 gate run surfaced
+    when no PR #80 / PR #81 hint reached the planner LLM during plan
+    REPL.
+    """
+
+    backend = BuiltinPlannerBackend(llm_mode="auto")
+    llm = _ScriptedLLM([json.dumps(_VALID_DRAFT)])
+    backend.bind_llm(llm)
+    backend.start(_request(tmp_path, worker_name="aider"))
+    assert len(llm.calls) == 1, "scripted LLM must have been called once"
+    _system, user = llm.calls[0]
+    assert "Worker quirks to design around" in user, (
+        "B.2 hint block missing from interactive planner user message; "
+        "PlannerRequest.worker_name was not plumbed into "
+        "build_planner_messages — Bug E regression."
+    )
+    assert "current backend: aider" in user
+    assert "pytest -v" in user, (
+        "PR #81 tightened test_command_path quirk should be visible in "
+        "the planner message body when worker_name='aider'."
+    )
+
+
+def test_builtin_backend_no_quirk_block_when_worker_name_omitted(
+    tmp_path: Path,
+) -> None:
+    """Symmetric guard: when the operator does not pass ``--worker``,
+    the planner stays B.9 contract-Q1-clean (worker-agnostic, no quirk
+    block). Defends against an accidental "always inject aider quirks"
+    regression."""
+
+    backend = BuiltinPlannerBackend(llm_mode="auto")
+    llm = _ScriptedLLM([json.dumps(_VALID_DRAFT)])
+    backend.bind_llm(llm)
+    backend.start(_request(tmp_path))  # worker_name defaults to None
+    _system, user = llm.calls[0]
+    assert "Worker quirks to design around" not in user
+    assert "current backend:" not in user
 
 
 def test_planner_tool_output_does_not_leak_to_reviewer_prompt() -> None:

@@ -10,6 +10,50 @@ from click.testing import CliRunner
 from ai_cockpit.cli import main as cli_main
 
 
+def test_plan_accepts_worker_flag_and_routes_to_run_interactive_planner(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    """Bug E regression: ``ai-cockpit plan --worker aider`` must reach
+    ``run_interactive_planner(worker_name='aider')``. Before PR #82 the
+    CLI had no ``--worker`` flag at all, so B.2 hints could never flow
+    through the interactive planning path."""
+
+    captured: dict[str, object] = {}
+
+    def _fake_run(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("ai_cockpit.cli.run_interactive_planner", _fake_run)
+    result = CliRunner().invoke(
+        cli_main,
+        [
+            "plan", "ship interactive planner",
+            "--root", str(tmp_path),
+            "--llm", "none",
+            "--worker", "aider",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured.get("worker_name") == "aider"
+
+
+def test_plan_worker_flag_omitted_passes_none(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("ai_cockpit.cli.run_interactive_planner", _fake_run)
+    result = CliRunner().invoke(
+        cli_main,
+        ["plan", "ship", "--root", str(tmp_path), "--llm", "none"],
+    )
+    assert result.exit_code == 0, result.output
+    assert captured.get("worker_name") is None
+
+
 def test_plan_rejects_real_llm_without_tty(tmp_path: Path) -> None:
     result = CliRunner().invoke(
         cli_main,

@@ -96,8 +96,17 @@ def run_interactive_planner(
     max_slices: int | None,
     max_turns: int,
     max_tool_bytes: int,
+    worker_name: str | None = None,
 ) -> None:
-    """Run the interactive planner REPL."""
+    """Run the interactive planner REPL.
+
+    ``worker_name`` (Bug E, 2026-05-17): the intended downstream
+    apply-capable worker. When non-empty the builtin backend forwards
+    ``quirks_for(worker_name)`` into the planner prompt so B.2 hints
+    actually reach the LLM. Default ``None`` preserves the pre-B.2
+    behaviour and the B.9 contract Q1 "worker-agnostic by default"
+    posture.
+    """
 
     request = PlannerRequest(
         idea=idea,
@@ -109,6 +118,7 @@ def run_interactive_planner(
         max_slices=max_slices,
         max_turns=max_turns,
         max_tool_bytes=max_tool_bytes,
+        worker_name=worker_name,
     )
     planner = build_planner_backend(request)
     try:
