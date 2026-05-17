@@ -625,6 +625,20 @@ def run_cmd(
     type=click.IntRange(min=1000, max=100000),
     help="Reserved for B.9b read-only tool output clipping.",
 )
+@click.option(
+    "--worker",
+    "worker_name",
+    default=None,
+    type=click.Choice(["aider", "cursor", "stub"], case_sensitive=False),
+    help=(
+        "Optional hint about the intended downstream apply-capable "
+        "worker; when set, the planner prompt is augmented with the "
+        "matching B.2 worker-quirk hints so the LLM can avoid known "
+        "failure modes (e.g. aider's .gitignore auto-edit, the verifier "
+        "test_command-path convention). Default None keeps B.9 worker-"
+        "agnostic per contract Q1."
+    ),
+)
 def plan_cmd(
     idea: tuple[str, ...],
     root: str,
@@ -634,6 +648,7 @@ def plan_cmd(
     max_slices: int | None,
     max_turns: int,
     max_tool_bytes: int,
+    worker_name: str | None,
 ) -> None:
     """Start the B.9 interactive planning REPL."""
 
@@ -653,6 +668,7 @@ def plan_cmd(
         max_slices=max_slices,
         max_turns=max_turns,
         max_tool_bytes=max_tool_bytes,
+        worker_name=worker_name.lower() if worker_name else None,
     )
 
 

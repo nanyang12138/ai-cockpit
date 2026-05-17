@@ -77,12 +77,17 @@ class BuiltinPlannerBackend:
 
     def _llm_turn(self, *, feedback: str | None) -> PlannerResponse:
         assert self._llm is not None and self._request is not None
+        from ai_cockpit.workers.quirks import quirks_for
+
+        worker_name = self._request.worker_name
         system, user = build_planner_messages(
             idea=self._request.idea,
             memory_context=self._request.memory_context,
             tools=self._tools.values(),
             feedback=feedback,
             current_draft=(self._draft.to_dict() if self._draft else None),
+            worker_hints=quirks_for(worker_name),
+            worker_name=worker_name,
         )
         try:
             raw = self._llm.complete(system=system, user=user)
