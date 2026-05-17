@@ -425,6 +425,43 @@ _CANONICAL_AIDER_STDOUT = (
             {"cost_message_usd": 0.10, "cost_session_usd": 0.50},
             id="cost-only-no-tokens",
         ),
+        # Regression: real aider 0.86.2 output observed during the
+        # 2026-05-17 v0.4 exit-gate attempt 3. Both halves on a single
+        # line; the original PR #35 regex rejected this shape and
+        # silently zeroed Q4(1) cost evidence on the first real gate
+        # run. See docs/V0_3_MILESTONES.md and the PR body for details.
+        pytest.param(
+            "Tokens: 13k sent, 173 received. Cost: $0.07 message, $0.07 session.\n",
+            {
+                "tokens_sent": 13_000.0,
+                "tokens_received": 173.0,
+                "cost_message_usd": 0.07,
+                "cost_session_usd": 0.07,
+            },
+            id="single-line-real-aider-0_86_2-format",
+        ),
+        pytest.param(
+            "Tokens: 13k sent, 173 received. Cost: $0.07 message, $0.07 session.\n"
+            "Applied edit to calc.py\n"
+            "Tokens: 8.0k sent, 820 received. Cost: $0.06 message, $0.13 session.\n",
+            {
+                "tokens_sent": 8_000.0,
+                "tokens_received": 820.0,
+                "cost_message_usd": 0.06,
+                "cost_session_usd": 0.13,
+            },
+            id="single-line-multi-turn-last-wins",
+        ),
+        pytest.param(
+            "  Tokens: 13k sent, 173 received. Cost: $0.07 message, $0.07 session.\n",
+            {
+                "tokens_sent": 13_000.0,
+                "tokens_received": 173.0,
+                "cost_message_usd": 0.07,
+                "cost_session_usd": 0.07,
+            },
+            id="single-line-with-leading-indent",
+        ),
     ],
 )
 def test_metrics_extracted_from_aider_stdout(
