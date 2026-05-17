@@ -94,7 +94,10 @@ def build_graph(
     effective_reviewer_llm = reviewer_llm if reviewer_llm is not None else llm
 
     builder.add_node("intake", intake_node)
-    builder.add_node("planner", make_planner_node(llm))  # type: ignore[arg-type]
+    builder.add_node(
+        "planner",
+        make_planner_node(llm, worker_name=worker_name),  # type: ignore[arg-type]
+    )
     builder.add_node("coder", make_coder_node(worker_name))  # type: ignore[arg-type]
     builder.add_node("verifier", verifier_node)
     builder.add_node("reviewer", make_reviewer_node(effective_reviewer_llm))  # type: ignore[arg-type]

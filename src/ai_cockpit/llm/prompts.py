@@ -40,18 +40,36 @@ REVIEWER_SCHEMA = {
 }
 
 
-def build_planner_messages(*, idea: str, memory_context: str) -> tuple[str, str]:
-    """Return (system, user) messages for the planner LLM call."""
+def build_planner_messages(
+    *,
+    idea: str,
+    memory_context: str,
+    worker_hints: list[str] | None = None,
+    worker_name: str | None = None,
+) -> tuple[str, str]:
+    """Return (system, user) messages for the planner LLM call.
 
-    user = (
-        "Memory context (may be empty):\n"
-        f"{memory_context.strip() or '(none)'}\n\n"
-        "User idea:\n"
-        f"{idea.strip()}\n\n"
+    ``worker_hints`` (B.2) is an optional list of one-line human
+    summaries produced by ``quirks_for(worker_name)``. When non-empty,
+    a labelled, clip-bounded subsection is appended via the shared
+    formatter. Default ``None`` keeps every existing call site
+    byte-identical. Reviewer prompt is untouched — §9 boundary.
+    """
+
+    from ai_cockpit.workers.quirks import format_worker_hints_block
+
+    parts = [
+        "Memory context (may be empty):\n" + (memory_context.strip() or "(none)"),
+        "User idea:\n" + idea.strip(),
+    ]
+    hints_block = format_worker_hints_block(worker_hints, worker_name)
+    if hints_block is not None:
+        parts.append(hints_block)
+    parts.append(
         "Reply with JSON of this exact shape:\n"
         f"{json.dumps(PLANNER_SCHEMA, indent=2)}"
     )
-    return PLANNER_SYSTEM, user
+    return PLANNER_SYSTEM, "\n\n".join(parts)
 
 
 def build_reviewer_evidence(state: dict[str, Any]) -> dict[str, Any]:

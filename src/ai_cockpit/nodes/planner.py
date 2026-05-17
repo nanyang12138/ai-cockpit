@@ -15,6 +15,7 @@ from collections.abc import Callable
 from ai_cockpit.llm import LLMProvider
 from ai_cockpit.llm.prompts import build_planner_messages, parse_json_response
 from ai_cockpit.state import TaskState
+from ai_cockpit.workers.quirks import quirks_for
 
 log = logging.getLogger(__name__)
 
@@ -52,8 +53,19 @@ def _stub_plan(idea: str) -> dict[str, object]:
     }
 
 
-def _llm_plan(llm: LLMProvider, idea: str, memory_context: str) -> dict[str, object] | None:
-    system, user = build_planner_messages(idea=idea, memory_context=memory_context)
+def _llm_plan(
+    llm: LLMProvider,
+    idea: str,
+    memory_context: str,
+    *,
+    worker_name: str | None = None,
+) -> dict[str, object] | None:
+    system, user = build_planner_messages(
+        idea=idea,
+        memory_context=memory_context,
+        worker_hints=quirks_for(worker_name),
+        worker_name=worker_name,
+    )
     try:
         raw = llm.complete(system=system, user=user)
     except Exception as exc:  # noqa: BLE001 — LLM call site, must not crash the run
@@ -78,8 +90,18 @@ def _llm_plan(llm: LLMProvider, idea: str, memory_context: str) -> dict[str, obj
     }
 
 
-def make_planner_node(llm: LLMProvider | None) -> Callable[[TaskState], TaskState]:
-    """Return a planner node bound to an optional LLM provider."""
+def make_planner_node(
+    llm: LLMProvider | None,
+    *,
+    worker_name: str | None = None,
+) -> Callable[[TaskState], TaskState]:
+    """Return a planner node bound to an optional LLM provider.
+
+    ``worker_name`` (B.2) is resolved at message-build time via
+    ``quirks_for(worker_name)`` and appended as planner hints. Default
+    ``None`` keeps every existing call site byte-identical (no hint
+    block emitted).
+    """
 
     def planner_node(state: TaskState) -> TaskState:
         idea = state.get("idea") or state.get("user_input") or ""
@@ -87,7 +109,9 @@ def make_planner_node(llm: LLMProvider | None) -> Callable[[TaskState], TaskStat
 
         result: dict[str, object] | None = None
         if llm is not None:
-            result = _llm_plan(llm, idea, memory_context)
+            result = _llm_plan(
+                llm, idea, memory_context, worker_name=worker_name
+            )
         if result is None:
             result = _stub_plan(idea)
 
