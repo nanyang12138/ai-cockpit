@@ -337,11 +337,43 @@ branch `cursor/v0_4-b3-impl`). One gate per tick; see
 
 ### B.4 — `--system-prompt FILE` override
 
+**Status: contract draft authored 2026-05-17 (queue item #9 of
+the v0.3 Cursor hardening + v0.4 startup window). Full draft
+lives in `docs/B_4_CONTRACT.md`.** Implementation is NOT
+pre-authorized — it requires a separate user signal after
+post-review of the draft.
+
 Lets project-specific planner/reviewer prompts be loaded without
-modifying source. Spec §9 risk — bad prompt could undo the
-anti-deception evidence shape. Needs an explicit allow-list of
-prompt placeholders (e.g., must include `{evidence}` for the
-reviewer).
+modifying source. Spec §9 risk — a bad reviewer prompt could
+erase the evidence-only invariant. The draft mitigates this with
+a per-role allow-list evaluated at CLI boot, before any LLM
+call. Draft shape (Q1–Q5 in the contract):
+
+- **CLI surface:** two role-scoped flags
+  `--planner-system-prompt FILE` and `--reviewer-system-prompt
+  FILE`, threaded through `ai-cockpit plan` / `plans run` /
+  planner-interactive. Each defaults to `None` (use the built-in
+  constant). Plain UTF-8 text, ≤8 KiB, no template engine.
+- **Allow-list (fail-closed):** reviewer override must contain
+  `"structured evidence"` AND `"do not trust"` (case-insensitive)
+  AND must NOT contain `"coder_result"`. Planner override must
+  contain `"strict JSON"` (case-insensitive). Empty / oversized
+  / missing files raise `PromptOverrideError`; the CLI exits
+  non-zero before any LLM call.
+- **Prompt wiring:** both `llm/prompts.py` and
+  `planner_interactive/prompts.py` gain an optional
+  `system_override` kwarg on `build_planner_messages` and
+  `build_reviewer_messages`. The reviewer **user** message
+  (the §9 evidence shape) is **unchanged**.
+- **Out of scope:** schema override, URL / plugin / marketplace
+  loading, env-var equivalent, template engine variables, auto-
+  discovery from project root, memory-driven override learning,
+  precedence-merging.
+
+Cron is authorized only for the contract gate. The implementation
+PR requires a fresh user signal that references the specific Q-row
+being addressed. See `docs/B_4_CONTRACT.md` §11 (authorization)
+and §15 (open-gate protocol).
 
 ### B.5 — v0.4 exit-gate definition
 
