@@ -1003,6 +1003,16 @@ def _resolve_plan_or_die(project_root: Path, plan_id: str) -> Plan:
         "trust' (case-insensitive) and must not contain 'coder_result'."
     ),
 )
+@click.option(
+    "--allow-dirty-tree", "allow_dirty_tree", is_flag=True, default=False,
+    help=(
+        "Bypass the A.7 dirty-tree precheck. Surfaced by the first v0.4 "
+        "exit-gate run: `ai-cockpit plan ... /save` writes "
+        "`docs/plans/<id>.plan.yaml` as an untracked file, which the "
+        "precheck would otherwise refuse. This flag mirrors the legacy "
+        "`ai-cockpit run --allow-dirty-tree`."
+    ),
+)
 def plans_run_cmd(
     plan_id: str,
     slice_id: str,
@@ -1016,6 +1026,7 @@ def plans_run_cmd(
     reviewer_backend: str,
     planner_system_prompt: str | None,
     reviewer_system_prompt: str | None,
+    allow_dirty_tree: bool,
 ) -> None:
     project_root = Path(root).resolve()
     plan = _resolve_plan_or_die(project_root, plan_id)
@@ -1039,8 +1050,13 @@ def plans_run_cmd(
     effective_dry_run = dry_run or (
         worker_name in _APPLY_CAPABLE_WORKERS and not apply
     )
-    if worker_name in _APPLY_CAPABLE_WORKERS and apply:
+    if worker_name in _APPLY_CAPABLE_WORKERS and apply and not allow_dirty_tree:
         _enforce_dirty_tree_precheck(str(project_root), worker_name=worker_name)
+    elif allow_dirty_tree and worker_name in _APPLY_CAPABLE_WORKERS and apply:
+        click.echo(
+            "warning: --allow-dirty-tree set; A.7 precheck skipped on plans run.",
+            err=True,
+        )
 
     llm = build_llm(llm_mode)
     if llm_mode != "none" and llm is None:

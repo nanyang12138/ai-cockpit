@@ -137,3 +137,77 @@ def test_plans_run_executes_when_no_deps(plan_repo: tuple[Path, Plan]) -> None:
     )
     assert result.exit_code == 0, result.output
     assert "running slice demo-plan/slice-a" in result.output
+
+
+def test_plans_run_allow_dirty_tree_skips_a7_precheck(
+    plan_repo: tuple[Path, Plan], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression surfaced by the 2026-05-17 v0.4 gate run:
+
+    ``ai-cockpit plan ... /save`` writes ``docs/plans/<id>.plan.yaml``
+    as an untracked file, which the A.7 precheck would refuse for
+    ``--worker aider --apply``. Without ``--allow-dirty-tree`` on
+    ``plans run`` there is no way to proceed, so the legacy
+    ``ai-cockpit run --allow-dirty-tree`` bypass must work here too.
+
+    Mock both the precheck and the graph runner: the test only cares
+    about whether the precheck branch is taken, not whether aider can
+    actually spawn in CI.
+    """
+    repo, plan = plan_repo
+    seen: list[str] = []
+
+    def _fake_precheck(*args: object, **kwargs: object) -> None:
+        seen.append("precheck-called")
+
+    def _fake_run_graph(**_: object) -> dict[str, object]:
+        return {"final_summary": "stubbed by test"}
+
+    monkeypatch.setattr(
+        "ai_cockpit.cli._enforce_dirty_tree_precheck", _fake_precheck
+    )
+    monkeypatch.setattr("ai_cockpit.cli.run_graph", _fake_run_graph)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        [
+            "plans", "run", plan.plan_id, "slice-a",
+            "--root", str(repo), "--no-checkpoint",
+            "--worker", "aider", "--apply", "--allow-dirty-tree",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert seen == [], "A.7 precheck should be skipped under --allow-dirty-tree"
+    assert "A.7 precheck skipped on plans run" in result.output
+
+
+def test_plans_run_blocks_without_allow_dirty_tree(
+    plan_repo: tuple[Path, Plan], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without ``--allow-dirty-tree``, ``--worker aider --apply`` must
+    reach the A.7 precheck path (parity with the legacy
+    ``ai-cockpit run`` surface)."""
+    repo, plan = plan_repo
+    called: list[str] = []
+
+    def _fake_precheck(root: str, *, worker_name: str = "aider") -> None:
+        called.append(worker_name)
+
+    def _fake_run_graph(**_: object) -> dict[str, object]:
+        return {"final_summary": "stubbed by test"}
+
+    monkeypatch.setattr(
+        "ai_cockpit.cli._enforce_dirty_tree_precheck", _fake_precheck
+    )
+    monkeypatch.setattr("ai_cockpit.cli.run_graph", _fake_run_graph)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        [
+            "plans", "run", plan.plan_id, "slice-a",
+            "--root", str(repo), "--no-checkpoint",
+            "--worker", "aider", "--apply",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert called == ["aider"], "A.7 precheck must run when flag is absent"
