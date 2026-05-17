@@ -274,11 +274,36 @@ bridge follow-up; budget for that.
 
 ### B.2 — planner prompt awareness of worker quirks
 
+**Status: contract draft authored 2026-05-17 (queue item #8 of
+the v0.3 Cursor hardening + v0.4 startup window). Full draft
+lives in `docs/B_2_CONTRACT.md`.** Implementation is NOT
+pre-authorized — it requires a separate user signal after
+post-review of the draft.
+
 The §15.1 first run rejected on aider's `.gitignore` auto-edit.
-PR #24 silenced that at the worker level. A safer long-term fix is
-to teach the planner to avoid criteria the worker can't satisfy.
-This touches the planner prompt, which is spec §9 sensitive — needs
-human review.
+PR #24 silenced that at the worker level (`--no-gitignore`). The
+long-term fix is to teach the planner to avoid criteria the
+worker can't satisfy. Draft shape (Q1–Q5 in the contract):
+
+- **Catalog:** static `src/ai_cockpit/workers/quirks.py` exposing
+  `WORKER_QUIRKS: dict[str, tuple[WorkerQuirk, ...]]` keyed by
+  worker name (`"aider"`, `"cursor"`, `"stub"`).
+- **Prompt wiring:** both `llm/prompts.py` and
+  `planner_interactive/prompts.py` gain an optional
+  `worker_hints` kwarg appended as a clipped subsection
+  (≤6 bullets, ≤80 chars each) to the planner user message.
+  Reviewer prompt is **unchanged** — §9 hard boundary.
+- **Seed entries:** `aider.gitignore` and `cursor.workspace_scan`
+  placeholder; the worker-level `--no-gitignore` flag stays as
+  defense-in-depth.
+- **Out of scope:** reviewer-side change, plugin-loaded quirks,
+  runtime worker discovery, memory-driven quirk learning,
+  per-criterion pre-validator.
+
+Cron is authorized only for the contract gate. The implementation
+PR requires a fresh user signal that references the specific Q-row
+being addressed. See `docs/B_2_CONTRACT.md` §11 (authorization)
+and §15 (open-gate protocol).
 
 ### B.3 — real-LLM cost dashboard
 
