@@ -390,12 +390,17 @@ Key locked decisions:
 Implementation splits into B.9a / B.9b / B.9c, with optional B.9d for
 Cursor backend. Same ≤8 files / ≤400 net LOC cap applies. B.9a is now
 authorized; later source work is NOT authorized until the user
-explicitly says "open-gate B.9b" / "open-gate B.9c" / "open-gate B.9d"
-(or equivalent).
+explicitly says "open-gate B.9b" / "open-gate B.9c" (or equivalent).
 
 2026-05-16 addendum: the optional Cursor planner backend should be
 implemented through B.10's broader Cursor-backed role backend contract,
 not as an isolated B.9-only adapter.
+
+**B.9d — SUPERSEDED-FINAL by B.10b (2026-05-17).** The Cursor-backed
+interactive planner is now delivered by `CursorPlannerBackend` from
+B.10b (PR #53, `62976f9`); a separate B.9-only adapter would only
+duplicate that path. B.9d will not ship as a standalone gate. The
+B.9 contract §9 / §12 entries carry the same final-supersede marker.
 
 ### B.10 — Cursor-backed role backends
 

@@ -1,10 +1,11 @@
 # B.9 — Interactive Planner Mode (contract v0.1)
 
-Status: **B.9a open-gated by the user on 2026-05-16 and implemented on
-branch `cursor/b9-interactive-planner-contract-1a13`; B.9b/B.9c/B.9d
-remain gated.** This document captures the design that was reviewed with
-the user on 2026-05-16 after the A2A / Cursor Plan Mode / Claude Code
-discussion.
+Status: **B.9a/B.9b/B.9c DONE & merged to master (PRs #44, #46, #47).
+B.9d is SUPERSEDED-FINAL by B.10b (2026-05-17) — the Cursor-backed
+interactive planner ships as `CursorPlannerBackend` and B.9d will not
+be opened as a standalone gate.** This document captures the design
+reviewed with the user on 2026-05-16 after the A2A / Cursor Plan Mode
+/ Claude Code discussion.
 
 > This contract adds a human-in-the-loop planning surface to
 > `ai-cockpit`. The user explicitly opened B.9a. Later implementation
@@ -240,7 +241,13 @@ Forbidden tools:
 - writing `.ai-cockpit/memory/*`;
 - calling another autonomous agent as a peer.
 
-## 9. Optional Cursor backend (deferred)
+## 9. Optional Cursor backend (SUPERSEDED-FINAL by B.10b)
+
+**SUPERSEDED-FINAL 2026-05-17 by B.10b (PR #53, `62976f9`).** The
+Cursor-backed interactive planner is delivered by
+`CursorPlannerBackend` under the broader B.10 Cursor-role-backends
+contract; B.9d will not ship as a standalone gate. The sketch below
+is preserved for historical context only.
 
 A future B.9d may add:
 
@@ -371,16 +378,14 @@ Estimated 6 files / 350 net LOC.
 If B.6 schema code exists, reuse it. If not, this PR may introduce only
 the schema subset needed for saving; B.6 must later import or extend it.
 
-### B.9d — Optional Cursor backend (deferred)
+### B.9d — Optional Cursor backend (SUPERSEDED-FINAL by B.10b)
 
-Estimated 3 files / 180 net LOC.
-
-- `src/ai_cockpit/planner_interactive/backends/cursor.py`
-- CLI backend selection
-- tests with a fake `agent` binary on PATH
-
-B.9d must not block B.9a-c. It is allowed to remain unimplemented until
-the builtin flow proves useful.
+**SUPERSEDED-FINAL 2026-05-17.** Delivered by `CursorPlannerBackend`
+in B.10b (PR #53, `62976f9`). B.9d will not ship as a standalone
+gate; the original sketch (3 files / 180 net LOC,
+`src/ai_cockpit/planner_interactive/backends/cursor.py`, CLI backend
+selection, fake-`agent` tests) is preserved only for historical
+context.
 
 ## 13. Threat model
 
