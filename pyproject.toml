@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-cockpit"
-version = "0.1.0"
-description = "Personal AI workflow management layer (v0.1 vertical slice)."
+version = "0.3.0"
+description = "Personal AI workflow management layer (v0.3: real-LLM planner/reviewer, aider/cursor workers, plan artifacts, interactive planner, cost dashboard)."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }

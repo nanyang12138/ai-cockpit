@@ -99,7 +99,9 @@ def build_graph(
     builder.add_node(
         "planner",
         make_planner_node(  # type: ignore[arg-type]
-            llm, system_override=planner_system_override
+            llm,
+            worker_name=worker_name,
+            system_override=planner_system_override,
         ),
     )
     builder.add_node("coder", make_coder_node(worker_name))  # type: ignore[arg-type]

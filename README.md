@@ -1,29 +1,58 @@
-# AI Cockpit (v0.1)
+# AI Cockpit (v0.3)
 
-A minimal, safe, runnable vertical slice of a personal AI workflow
-management layer. Built per the spec in
-[`docs/AI_COCKPIT_SPEC_V1.md`](docs/AI_COCKPIT_SPEC_V1.md) and the
-implementation plan in
-[`docs/AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md`](docs/AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md).
+A safe, runnable personal AI workflow management layer. Built per the
+spec in [`docs/AI_COCKPIT_SPEC_V1.md`](docs/AI_COCKPIT_SPEC_V1.md), the
+v0.1 implementation plan in
+[`docs/AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md`](docs/AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md),
+and the cron-driven backlog in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
-This release implements only the vertical slice required by
-`AUTOMATION_PROMPT.md`:
+The core loop is a deterministic LangGraph state machine:
 
 ```
 idea input
 -> load memory
--> planner creates MVP spec
--> coder stub executes
+-> planner produces MVP spec / acceptance criteria / implementation slice
+-> coder runs the selected worker (stub | aider | cursor)
 -> verifier collects git diff/status and runs shell checks
--> reviewer evaluates evidence
+-> reviewer evaluates structured evidence only (spec §9)
 -> decision chooses done/retry/ask_human
 -> summary prints final result
+-> memory pipeline writes a suggestion (human accepts via CLI)
 ```
 
-It does **not** include UI, plugins, cloud execution, PR automation,
-ruflo integration, real coding workers, or LLM calls. The planner and
-reviewer use deterministic stub outputs; the coder uses a `StubWorker`
-that performs no edits.
+This release ships:
+
+- **Real LLM-backed planner & reviewer** behind a generic provider abstraction
+  that works with enterprise proxies (`LLM_API_KEY` / `LLM_API_BASE` /
+  `LLM_MODEL_NAME` / `LLM_API_EXTRA_HEADERS`).
+- **Three worker backends:** `stub` (default, no edits), `aider`
+  (`--worker aider --apply`), and `cursor` (`--worker cursor`, via the
+  B.10 Cursor role-backend adapter).
+- **SQLite checkpoint + `--thread-id` / `--resume`** so a run survives
+  process exit.
+- **Workflow YAML** actually drives the graph (`idea-to-mvp.yaml`,
+  `bug-fix.yaml`); `ai-cockpit workflows list / validate` inspects them.
+- **Memory suggestion pipeline:** every run writes a JSON suggestion under
+  `.ai-cockpit/suggestions/`; `ai-cockpit memory list / show / accept`
+  surfaces and applies them. No write to `.ai-cockpit/memory/*` ever
+  happens without `accept_suggestion` (hard rule §3.2).
+- **Multi-step planner & plan artifact (B.6):** `ai-cockpit plan "<idea>"`
+  drops the user into an interactive planner REPL; `/save` writes
+  `docs/plans/<plan_id>.plan.yaml`; `ai-cockpit plans run <plan_id>
+  <slice_id>` executes one slice with dependency-marker checks.
+- **Cursor-backed role backends (B.10):** optional `cursor` planner /
+  worker / reviewer / writer, discovered via `ai-cockpit cursor status`.
+- **Cost dashboard (B.3):** `ai-cockpit cost [--since DATE] [--format
+  text|json]` aggregates per-run token / cost metrics from the checkpoint
+  DB.
+- **Pre-run dirty-tree pre-check (A.7):** `--worker aider --apply` refuses
+  to start on top of unrelated working-tree changes unless
+  `--allow-dirty-tree` is passed.
+
+It deliberately does **not** include a UI, daemon process, cloud
+execution backend, multi-user mode, plugin marketplace, agent-to-agent
+swarm, or any auto-outbound email / Slack / PR comments. Those are
+permanent §12 boundaries — see `docs/ROADMAP.md` Section C.
 
 ## Install
 
@@ -282,20 +311,40 @@ out-of-scope list (Section C, mirroring spec §12).
 ```
 pyproject.toml
 README.md
+AUTOMATION_PROMPT.md
+AGENTS.md
 .ai-cockpit/
-  memory/        # markdown context loaded at intake
-  workflows/     # workflow templates (declarative, not executed in v0.1)
-  history/       # placeholder for future runs
+  memory/             # markdown context loaded at intake (human-curated)
+  workflows/          # workflow templates that drive the graph
+  history/            # SQLite checkpoint DB (gitignored)
+  suggestions/        # per-run memory suggestions (gitignored)
+docs/
+  AI_COCKPIT_SPEC_V1.md
+  AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md
+  ARCHITECTURE.md     # single-document map of the current codebase (A.6)
+  ROADMAP.md          # cron-safe + needs-user-direction backlogs
+  V0_2_COMPLETION.md  # v0.2 exit-gate evidence
+  V0_3_MILESTONES.md  # v0.3 narrative milestones
+  B_*_CONTRACT.md     # one locked design contract per Section B item
 src/ai_cockpit/
-  cli.py
+  cli.py              # click entry point + memory/workflows/plans subgroups
   config.py
-  state.py
-  graph.py
-  nodes/         # intake, planner, coder, verifier, reviewer, decision, summary
-  workers/       # base worker + StubWorker
-  tools/         # git + shell helpers
-  memory/        # memory loader
-tests/
+  state.py            # TaskState TypedDict
+  graph.py            # LangGraph compile + node wiring
+  checkpoint.py       # SqliteSaver + thread_id helpers
+  workflow.py         # workflow YAML parser + invariants
+  cost.py             # B.3 cost dashboard aggregator
+  nodes/              # intake, planner, coder, verifier, reviewer, decision, summary
+  workers/            # base + stub_worker + aider_worker
+  cursor_adapter/     # B.10 planner / worker / reviewer / writer backends + discovery
+  llm/                # generic provider abstraction + prompts
+  memory/             # memory loader + suggestion pipeline
+  plans/              # B.6 plan schema + atomic loader + dependency check
+  planner_interactive/# B.9 interactive planner REPL + tools + builtin backend
+  tools/              # git + shell helpers
+examples/
+  broken_calc/        # §15.1 runnable end-to-end demo fixture
+tests/                # 259 tests on master at v0.3 close
 ```
 
 For a single-document map of how these pieces fit together — graph
@@ -312,19 +361,32 @@ source .venv/bin/activate
 python -m pytest
 ```
 
-## Known Limitations (v0.1, partially addressed in v0.2 step 1 + step 3)
+## Known Limitations (v0.3 close)
 
-- Planner and reviewer default to deterministic stubs; pass `--llm auto`
-  with credentials to enable real LLM calls (v0.2 step 1).
-- Coder is still a `StubWorker` that never modifies files.
-- No human-in-the-loop interrupts; `ask_human` is reported but not interactive.
-- Checkpoint/resume now persists graph state to SQLite (v0.2 step 3),
-  but resumption is currently driven by the CLI only — no UI.
-- No real worker integration (Aider, Cursor SDK, OpenHands intentionally excluded).
+- Planner and reviewer fall back to deterministic stubs when no LLM
+  credentials are configured; `--llm auto` requires `LLM_API_KEY` (or
+  `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`).
+- The `cursor` planner / worker / reviewer / writer backends require a
+  Cursor CLI binary on `PATH` (auto-discovered as `agent` →
+  `cursor-agent` → `cursor`, overridable via `--binary`). Without one,
+  the CLI prints `CursorUnavailableError` and suggests `--backend builtin`.
+- `ask_human` is reported through the run summary; there is no
+  interactive interrupt mid-graph.
+- Checkpoint/resume is CLI-driven only; there is no UI.
+- The v0.4 end-to-end exit-gate run (real LLM, real repo, zero human
+  intervention) has not yet been operator-executed — see B.5 below.
 
 ## Recommended Next Step
 
-Replace the planner/reviewer stubs with real LLM calls behind a small
-adapter, then introduce a single real coding worker (e.g. Aider) gated
-behind explicit configuration. See
-`docs/AI_COCKPIT_IMPLEMENTATION_PLAN_V0.md` §16 for the roadmap.
+Run the **v0.4 exit-gate** described in
+[`docs/B_5_CONTRACT.md`](docs/B_5_CONTRACT.md) §4: a complete `plan →
+plans run → verifier → reviewer → memory` loop against
+`examples/broken_calc/` under real LLM credentials, with cost ≤ $1,
+wall-time ≤ 15 min, zero human intervention, and the spec §9
+anti-deception suite green. Cron is **not** authorized to execute the
+gate run; it is operator-driven by design (hard rule §3.5). Capture
+the run in `docs/V0_4_EXIT_EVIDENCE.md` and merge to declare v0.4 done.
+
+For incremental work that does not require user open-gate signal, see
+`docs/ROADMAP.md` Section A (currently 8/8 complete) and the gated
+Section B items.

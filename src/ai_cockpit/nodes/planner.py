@@ -15,6 +15,7 @@ from collections.abc import Callable
 from ai_cockpit.llm import LLMProvider
 from ai_cockpit.llm.prompts import build_planner_messages, parse_json_response
 from ai_cockpit.state import TaskState
+from ai_cockpit.workers.quirks import quirks_for
 
 log = logging.getLogger(__name__)
 
@@ -57,11 +58,14 @@ def _llm_plan(
     idea: str,
     memory_context: str,
     *,
+    worker_name: str | None = None,
     system_override: str | None = None,
 ) -> dict[str, object] | None:
     system, user = build_planner_messages(
         idea=idea,
         memory_context=memory_context,
+        worker_hints=quirks_for(worker_name),
+        worker_name=worker_name,
         system_override=system_override,
     )
     try:
@@ -91,12 +95,19 @@ def _llm_plan(
 def make_planner_node(
     llm: LLMProvider | None,
     *,
+    worker_name: str | None = None,
     system_override: str | None = None,
 ) -> Callable[[TaskState], TaskState]:
     """Return a planner node bound to an optional LLM provider.
 
+    ``worker_name`` (B.2): resolved at message-build time via
+    ``quirks_for(worker_name)`` and appended as planner hints.
+
     ``system_override`` (B.4): pre-validated planner system prompt body;
     ``None`` falls back to the built-in.
+
+    Defaults keep every existing call site byte-identical (no hint
+    block emitted, built-in system string used).
     """
 
     def planner_node(state: TaskState) -> TaskState:
@@ -106,7 +117,11 @@ def make_planner_node(
         result: dict[str, object] | None = None
         if llm is not None:
             result = _llm_plan(
-                llm, idea, memory_context, system_override=system_override
+                llm,
+                idea,
+                memory_context,
+                worker_name=worker_name,
+                system_override=system_override,
             )
         if result is None:
             result = _stub_plan(idea)
