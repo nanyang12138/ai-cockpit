@@ -10,6 +10,7 @@ silently prepends ``run`` before dispatching.
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from datetime import UTC, datetime
@@ -18,6 +19,9 @@ from pathlib import Path
 import click
 
 from ai_cockpit.checkpoint import new_thread_id, resolve_checkpoint_db
+from ai_cockpit.cost import aggregate as cost_aggregate
+from ai_cockpit.cost import render_json as cost_json
+from ai_cockpit.cost import render_text as cost_text
 from ai_cockpit.cursor_adapter import (
     CursorAdapterStatus,
     CursorReviewerBackend,
@@ -1173,6 +1177,44 @@ def plans_show_cmd(plan_id: str, root: str) -> None:
     for plan_slice in plan.slices:
         mark = "[✓]" if plan_slice.id in done else "[✗]"
         click.echo(f"{mark} {plan_slice.id}: {plan_slice.title}")
+
+
+# cost subcommand (B.3) — read-only checkpoint-DB cost aggregator.
+
+
+@main.command(
+    name="cost",
+    help="Aggregate worker token/cost metrics from the checkpoint DB "
+         "(read-only; never enforces a threshold — B.3 contract §3 Q6).",
+)
+@click.option("--root", "root", default=".", show_default=True,
+              type=click.Path(exists=True, file_okay=False, dir_okay=True,
+                              resolve_path=True))
+@click.option("--checkpoint-db", "checkpoint_db", default=None,
+              type=click.Path(dir_okay=False),
+              help="Override DB path (default: "
+                   "<root>/.ai-cockpit/history/checkpoints.sqlite).")
+@click.option("--since", "since", default=None, type=str,
+              help="Filter by latest-checkpoint ts: 'today', YYYY-MM-DD, "
+                   "or ISO-8601 datetime.")
+@click.option("--format", "fmt", default="text", show_default=True,
+              type=click.Choice(["text", "json"], case_sensitive=False))
+def cost_cmd(root: str, checkpoint_db: str | None,
+             since: str | None, fmt: str) -> None:
+    """Print per-thread + grand-total token / cost numbers."""
+    db_path = resolve_checkpoint_db(str(Path(root).resolve()), checkpoint_db)
+    if not db_path.is_file():
+        click.echo(f"no checkpoint db found at {db_path}", err=True)
+        return
+    try:
+        report = cost_aggregate(db_path, since=since)
+    except ValueError as exc:
+        raise click.UsageError(str(exc)) from exc
+    if fmt.lower() == "json":
+        click.echo(json.dumps(cost_json(report), indent=2, sort_keys=True))
+    else:
+        for line in cost_text(report):
+            click.echo(line)
 
 
 if __name__ == "__main__":
