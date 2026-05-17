@@ -1029,6 +1029,19 @@ def _resolve_plan_or_die(project_root: Path, plan_id: str) -> Plan:
         "`ai-cockpit run --allow-dirty-tree`."
     ),
 )
+@click.option(
+    "--suggest/--no-suggest",
+    "suggest",
+    default=True,
+    show_default=True,
+    help=(
+        "After the run, write a memory-update suggestion JSON under "
+        "<root>/.ai-cockpit/suggestions/ (B.5 §3 Q1 requires at least "
+        "one such suggestion for the v0.4 exit-gate). Mirrors the "
+        "legacy `ai-cockpit run --suggest` flag, missing on `plans run` "
+        "until Bug G (PR #84, 2026-05-17 v0.4 gate attempt 8)."
+    ),
+)
 def plans_run_cmd(
     plan_id: str,
     slice_id: str,
@@ -1043,6 +1056,7 @@ def plans_run_cmd(
     planner_system_prompt: str | None,
     reviewer_system_prompt: str | None,
     allow_dirty_tree: bool,
+    suggest: bool,
 ) -> None:
     project_root = Path(root).resolve()
     plan = _resolve_plan_or_die(project_root, plan_id)
@@ -1100,7 +1114,7 @@ def plans_run_cmd(
         reviewer_system_prompt, role="reviewer"
     )
 
-    run_graph(
+    final_state = run_graph(
         user_input=slice_to_user_input(plan, slice_obj),
         project_root=str(project_root),
         mode="task",
@@ -1114,6 +1128,23 @@ def plans_run_cmd(
         planner_system_override=planner_override_body,
         reviewer_system_override=reviewer_override_body,
     )
+
+    if suggest and final_state is not None:
+        try:
+            suggestion = generate_and_write(str(project_root), final_state)
+        except SuggestionError as exc:
+            click.echo(
+                f"warning: could not write memory suggestion: {exc}", err=True
+            )
+        else:
+            if suggestion is not None:
+                click.echo(
+                    f"info: memory suggestion written: {suggestion.id} "
+                    f"(target={suggestion.target}); "
+                    "see `ai-cockpit memory list` to review or "
+                    "`ai-cockpit memory accept <id>` to apply.",
+                    err=True,
+                )
 
 
 # ---------------------------------------------------------------------------
