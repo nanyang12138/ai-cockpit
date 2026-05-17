@@ -267,10 +267,12 @@ DOES come back and say "go", the contract is ready.
 
 ### B.1 — second real worker (Cursor SDK or OpenHands)
 
-Spec §14 lists alternatives. Pick ONE before starting. Same shape
-as the Aider worker (Worker protocol, `--worker <name>` CLI choice,
-dry-run-by-default, env passthrough). Likely needs an APIM-style
-bridge follow-up; budget for that.
+**SUPERSEDED-FINAL by B.10, will not ship as standalone gate.**
+B.10c's `CursorWorkerBackend` already serves as the second worker
+backend alongside aider; adding OpenHands / Claude Code SDK would
+inflate the worker matrix from 2 to 3 with no matching value.
+Re-opening requires a fresh user signal that names a specific
+backend and a justification that outweighs the matrix cost.
 
 ### B.2 — planner prompt awareness of worker quirks
 
