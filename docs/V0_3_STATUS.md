@@ -1,10 +1,12 @@
 # v0.3 — Operating Status (in-repo snapshot / fallback)
 
-**Status as of 2026-05-17, master tip `dc4197b`:** `idle-healthy`.
-Section A is 8/8 complete. Section B's required set is delivered.
-The only remaining v0.3-class work is the operator-driven v0.4 exit
-gate (B.5). No `active_plan_id` is set; cron is NOT authorized to
-execute any `plans run` slice.
+**Status as of 2026-05-17 ~08:51 UTC, master tip `338d668`:**
+`idle-healthy`. Section A is 8/8 complete. Section B's required set
+is delivered **plus B.2 implementation (PR #66)**; only B.4
+implementation remains gated. The v0.4 exit-gate operator runbook
+and evidence template shipped (PR #73); the gate run itself is still
+operator-driven and has not been executed. No `active_plan_id` is
+set; cron is NOT authorized to execute any `plans run` slice.
 
 ## 1. What this file is
 
@@ -36,13 +38,15 @@ authorization model.
 
 ```
 mode:              idle-healthy
-master_tip:        dc4197b
+master_tip:        338d668
 last_section_a:    A.8 (PR #42, 2026-05-16) — Section A 8/8 complete
-last_section_b:    B.1 supersede marker (PR #65, 2026-05-17)
+last_section_b:    B.2 implement (PR #66, 2026-05-17)
+last_v0_4_prep:    operator runbook + evidence template (PR #73, 2026-05-17)
 active_plan_id:    (none)
 v0.4_exit_gate:    NOT RUN — operator action required, see B_5_CONTRACT §4
+                   and scripts/v0_4_exit_gate.sh
 open_section_b:    B.5 contract (done), B.3 contract+impl (done),
-                   B.2 contract (done, impl not open-gated),
+                   B.2 contract+impl (done; PRs #63 + #66),
                    B.4 contract (done, impl not open-gated)
 ```
 
@@ -93,10 +97,10 @@ cron-actionable summary:
 | Item | Contract | Impl | Authorization |
 |------|----------|------|---------------|
 | B.1 second worker | superseded by B.10c | n/a | closed |
-| B.2 planner quirks | done (PR #63) | not started | needs explicit open-gate |
+| B.2 planner quirks | done (PR #63) | done (PR #66, `src/ai_cockpit/workers/quirks.py` + `tests/test_worker_quirks.py`) | closed |
 | B.3 cost dashboard | done (PR #61) | done (PR #62) | closed |
 | B.4 --system-prompt FILE | done (PR #64) | not started | needs explicit open-gate |
-| B.5 v0.4 exit gate | done (PR #60) | exit run pending | operator-only (B.5 §11.3) |
+| B.5 v0.4 exit gate | done (PR #60) | operator runbook + evidence template shipped (PR #73, `scripts/v0_4_exit_gate.sh`, `docs/V0_4_EXIT_EVIDENCE.md`); exit run itself still pending | operator-only (B.5 §11.3) |
 | B.6 multi-step planner | done | a/b/c shipped | closed (Q5 second key unset) |
 | B.9 interactive planner | done | a/b/c shipped; d superseded by B.10b | closed |
 | B.10 Cursor role backends | done | a/b/c/d/e shipped | closed |
@@ -123,25 +127,33 @@ discipline is:
    `idle-healthy` (or the next queued gate), and update this file in
    the next tick before any other action.
 
-## 6. v0.3 doc-resync window (2026-05-17)
+## 6. v0.3 doc-resync window (2026-05-17) — **CLOSED**
 
 The 2026-05-17 doc-resync that produced this file was authorized by
 the user message "好好的分析一下 / … 可以" on 2026-05-17 ~08:03 UTC.
-It is a **documentation-only** window and produces no `src/` changes.
-PRs in the window:
+It was a **documentation-only** window and produced no `src/` changes.
+All six PRs merged to master by 2026-05-17 ~08:51 UTC:
 
-| PR | Branch | Subject |
-|----|--------|---------|
-| #67 | `cursor/roadmap-mark-a2-a8-done-de7a` | ROADMAP A.2–A.8 ✅ DONE markers |
-| #68 | `cursor/readme-v03-resync-de7a` | README v0.1 → v0.3 resync |
-| #69 | `cursor/pyproject-bump-v03-de7a` | pyproject.toml version 0.1.0 → 0.3.0 |
-| #70 | `cursor/architecture-test-count-de7a` | ARCHITECTURE.md 16 → 17 test count |
-| (this PR) | `cursor/v03-status-snapshot-de7a` | this file |
-| (next) | `cursor/automation-prompt-v03-de7a` | AUTOMATION_PROMPT.md v0.2 → v0.3 |
+| PR | Branch | Subject | Status |
+|----|--------|---------|--------|
+| #67 | `cursor/roadmap-mark-a2-a8-done-de7a` | ROADMAP A.2–A.8 ✅ DONE markers | merged (`f0b7d23`) |
+| #68 | `cursor/readme-v03-resync-de7a` | README v0.1 → v0.3 resync | merged (`752da03`) |
+| #69 | `cursor/pyproject-bump-v03-de7a` | pyproject.toml version 0.1.0 → 0.3.0 | merged (`b3be6ab`) |
+| #70 | `cursor/architecture-test-count-de7a` | ARCHITECTURE.md 16 → 17 test count | merged (`e1d3716`) |
+| #72 | `cursor/v03-status-snapshot-de7a` | this file (initial commit) | merged (`b5469d8`) |
+| #74 | `cursor/automation-prompt-v03-de7a` | AUTOMATION_PROMPT.md v0.2 → v0.3 | merged (`338d668`) |
 
-After all six merge, `mode` returns to `idle-healthy` and cron waits
-for the next user signal (typically "open-gate B.5 exit run" or
-"open-gate B.2 impl" / "open-gate B.4 impl").
+Two **parallel** Section-B PRs merged inside the same window without
+being part of it (user-authorized independently):
+
+| PR | Subject | Status |
+|----|---------|--------|
+| #66 | B.2 implement: planner worker-quirk catalog + prompt hint injection | merged (`ab62ba7`) |
+| #73 | v0.4 exit-gate operator runbook script + evidence template | merged (`0171697`) |
+
+After the window closed, `mode` returned to `idle-healthy` and cron is
+waiting for the next user signal (typically "open-gate B.5 exit run"
+or "open-gate B.4 impl"; B.2 impl is now closed).
 
 ## 7. Permanent boundaries (carried verbatim from spec §12)
 
