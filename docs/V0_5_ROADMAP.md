@@ -51,7 +51,7 @@ is required.
 | # | gate slug             | summary                                                                 | files est | LOC est | depends on |
 | - | --------------------- | ----------------------------------------------------------------------- | --------- | ------- | ---------- |
 | 1 | `planner-replan`      | graph edge `decision → planner` for `replan_then_retry`                 | ≤6        | ≤300    | none       |
-| 2 | `reviewer-findings`   | reviewer emits `objective_findings`, next coder turn reads it           | ≤7        | ≤350    | #1 (recommended)        |
+| 2 | `reviewer-findings`   | reviewer emits `objective_findings`, next coder turn reads it — **CONTRACT LOCKED** at `docs/V0_5_ROW_2_REVIEWER_FINDINGS_CONTRACT.md` | ≤7        | ≤350    | #1 (recommended)        |
 | 3 | `prompt-coverage`     | golden-prompt CI + optional nightly real-LLM probe                      | ≤6        | ≤300    | none       |
 | 5 | `planner-self-check`  | deterministic static lint on planner output before coder runs           | ≤4        | ≤200    | none       |
 | 6 | `plan-cwd-context`    | `Plan.assumed_cwd` field + mismatch warning at `plans run` — **CONTRACT LOCKED** at `docs/V0_5_ROW_6_PLAN_CWD_CONTEXT_CONTRACT.md` | ≤4        | ≤120    | none       |
