@@ -255,8 +255,8 @@ the reviewer past this floor.
 
 ### Test coverage
 
-`tests/test_llm_planner_reviewer.py` (16 tests, including the
-A.5 hardening trio) pins:
+`tests/test_llm_planner_reviewer.py` (17 tests, including the
+A.5 hardening trio and the B.6c plan-yaml leak guard) pins:
 
 - the prompt-shape guarantee (`coder_result` byte-string absent
   from the captured messages, even when it imitates a verdict)
