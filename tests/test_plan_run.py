@@ -211,3 +211,96 @@ def test_plans_run_blocks_without_allow_dirty_tree(
     )
     assert result.exit_code == 0, result.output
     assert called == ["aider"], "A.7 precheck must run when flag is absent"
+
+
+def test_plans_run_writes_memory_suggestion_when_state_is_done(
+    plan_repo: tuple[Path, Plan], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bug G regression (2026-05-17 v0.4 gate attempt 8): after a
+    successful ``plans run`` the memory pipeline must write a
+    suggestion under ``<root>/.ai-cockpit/suggestions/``. Legacy
+    ``ai-cockpit run`` had this wired since PR #15 / v0.2 step 5a,
+    but B.6 PR #50 (``plans run``) shipped without it — making
+    B.5 §3 Q1 ('≥1 done suggestion applied via accept_suggestion')
+    unsatisfiable through the gate's plan-driven path.
+    """
+
+    repo, plan = plan_repo
+    state_seen: list[object] = []
+
+    def _fake_run_graph(**_: object) -> dict[str, object]:
+        return {
+            "idea": "Fix bugs",
+            "mvp_spec": "Fix calc.py add to return a + b",
+            "decision": "done",
+            "git_diff": "-return a - b\n+return a + b\n",
+            "final_summary": "stubbed by test",
+        }
+
+    def _fake_generate(project_root: str, state: object):
+        from ai_cockpit.memory.suggestions import Suggestion
+
+        state_seen.append((project_root, state))
+        return Suggestion(
+            id="20260517T999999-done-stub",
+            target="project.md",
+            operation="append",
+            content="stub suggestion",
+            rationale="test fixture",
+            created_at="2026-05-17T14:00:00+00:00",
+        )
+
+    monkeypatch.setattr("ai_cockpit.cli.run_graph", _fake_run_graph)
+    monkeypatch.setattr("ai_cockpit.cli.generate_and_write", _fake_generate)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        [
+            "plans", "run", plan.plan_id, "slice-a",
+            "--root", str(repo), "--no-checkpoint", "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert len(state_seen) == 1, (
+        "Bug G regression: plans run must call generate_and_write "
+        f"exactly once after run_graph returns; got {state_seen!r}"
+    )
+    entry = state_seen[0]
+    assert isinstance(entry, tuple) and len(entry) == 2
+    captured_root, captured_state = entry
+    assert captured_root == str(repo)
+    assert isinstance(captured_state, dict)
+    assert captured_state["decision"] == "done"
+    assert "memory suggestion written: 20260517T999999-done-stub" in result.output
+
+
+def test_plans_run_skips_memory_suggestion_with_no_suggest(
+    plan_repo: tuple[Path, Plan], monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``plans run --no-suggest`` must NOT call generate_and_write —
+    symmetric guard against accidentally always-on suggestion writes."""
+
+    repo, plan = plan_repo
+    calls: list[object] = []
+
+    def _fake_run_graph(**_: object) -> dict[str, object]:
+        return {"decision": "done", "final_summary": "ok"}
+
+    def _fake_generate(*_args: object, **_kw: object) -> object:
+        calls.append("called")
+        raise AssertionError("generate_and_write must not be called under --no-suggest")
+
+    monkeypatch.setattr("ai_cockpit.cli.run_graph", _fake_run_graph)
+    monkeypatch.setattr("ai_cockpit.cli.generate_and_write", _fake_generate)
+    runner = CliRunner()
+    result = runner.invoke(
+        cli_main,
+        [
+            "plans", "run", plan.plan_id, "slice-a",
+            "--root", str(repo), "--no-checkpoint", "--dry-run",
+            "--no-suggest",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    assert calls == [], "--no-suggest must skip the memory pipeline"
+    assert "memory suggestion written" not in result.output
