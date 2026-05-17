@@ -80,3 +80,77 @@ def test_verifier_dry_run_skips_commands(repo: Path) -> None:
     v = update["verification_result"]
     assert v["commands"] == []
     assert v["passed"] is True
+
+
+def test_verifier_detects_cwd_doubling_and_appends_hint(tmp_path: Path) -> None:
+    """Bug F regression (2026-05-17 v0.4 attempt 7) — Layer 3:
+
+    Even with the B.2 quirk + Bug F prompt context block in place, the
+    planner LLM may still emit ``pytest -v <cwd_name>/`` if it ignores
+    both signals. When that happens the verifier must append a clear
+    operator hint to stderr so the reviewer's evidence dict carries a
+    diagnostic, not just exit code 4 + "file or directory not found".
+    """
+
+    repo = tmp_path / "outer"
+    inner = repo / "fixture_pkg"
+    inner.mkdir(parents=True)
+    _init_git_repo(repo)
+    # Make 'fixture_pkg' resolvable from repo.parent (i.e. tmp_path)
+    # but NOT from cwd=inner — exactly the cwd-doubling shape.
+    state = initial_state(
+        user_input="x",
+        project_root=str(inner),
+        # cwd will be 'inner'; arg 'fixture_pkg/' exists in inner.parent
+        # but NOT in inner. ls is universally available and exits 2 on
+        # "no such file or directory", matching the heuristic.
+        test_commands=["ls fixture_pkg"],
+    )
+    update = verifier_node(state)
+    v = update["verification_result"]
+    assert len(v["commands"]) == 1
+    cmd_result = v["commands"][0]
+    assert cmd_result["exit_code"] != 0
+    assert "ai-cockpit-verifier hint" in cmd_result["stderr"], (
+        "Bug F Layer 3 regression: expected runtime hint when a failing "
+        "test_command references a path that exists in cwd.parent but "
+        "not in cwd. Stderr was: " + repr(cmd_result["stderr"])
+    )
+    assert "fixture_pkg" in cmd_result["stderr"]
+    assert v["passed"] is False
+
+
+def test_verifier_no_hint_on_success(tmp_path: Path) -> None:
+    """The runtime hint must only fire when the command actually fails."""
+
+    _init_git_repo(tmp_path)
+    state = initial_state(
+        user_input="x",
+        project_root=str(tmp_path),
+        test_commands=["true"],
+    )
+    update = verifier_node(state)
+    cmd_result = update["verification_result"]["commands"][0]
+    assert cmd_result["exit_code"] == 0
+    assert "ai-cockpit-verifier hint" not in (cmd_result.get("stderr") or "")
+
+
+def test_verifier_no_hint_when_failure_unrelated_to_path(
+    tmp_path: Path,
+) -> None:
+    """If the failure is not a path-not-found, no hint should fire."""
+
+    _init_git_repo(tmp_path)
+    state = initial_state(
+        user_input="x",
+        project_root=str(tmp_path),
+        # Exits 7 with an unrelated stderr — no 'file not found' pattern.
+        test_commands=[
+            "python -c \"import sys; sys.stderr.write('some other error'); "
+            "sys.exit(7)\""
+        ],
+    )
+    update = verifier_node(state)
+    cmd_result = update["verification_result"]["commands"][0]
+    assert cmd_result["exit_code"] == 7
+    assert "ai-cockpit-verifier hint" not in (cmd_result.get("stderr") or "")

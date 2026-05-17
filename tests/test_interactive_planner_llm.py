@@ -217,6 +217,42 @@ def test_builtin_backend_no_quirk_block_when_worker_name_omitted(
     assert "current backend:" not in user
 
 
+def test_builtin_backend_injects_verifier_cwd_context_block(
+    tmp_path: Path,
+) -> None:
+    """Bug F regression (2026-05-17 v0.4 gate attempt 7):
+
+    Even after PR #80 + #81 + #82 wired the B.2 quirk hint through the
+    interactive planner, ``claude-opus-4-6`` still emitted
+    ``pytest -v examples/broken_calc`` because the 78-char quirk
+    one-liner lost to the model's "tests run from repo root" prior.
+
+    Defense-in-depth: the builtin backend MUST now prepend a literal
+    factual cwd block (with the resolved absolute path of
+    ``project_root``) to the planner user message. The block is harder
+    to argue away than an abstract hint because it names the exact
+    directory string the verifier will pass to ``subprocess.run``.
+    """
+
+    backend = BuiltinPlannerBackend(llm_mode="auto")
+    llm = _ScriptedLLM([json.dumps(_VALID_DRAFT)])
+    backend.bind_llm(llm)
+    backend.start(_request(tmp_path))
+    _system, user = llm.calls[0]
+    assert "Verifier execution context" in user, (
+        "Bug F regression: planner user message missing the explicit "
+        "verifier cwd block. Re-check builtin backend's verifier_cwd "
+        "kwarg and prompts.py::_format_verifier_cwd_block."
+    )
+    assert str(tmp_path.resolve()) in user, (
+        "Bug F regression: planner user message missing the resolved "
+        "absolute path of project_root."
+    )
+    assert "FACTUAL, not a suggestion" in user, (
+        "Bug F regression: cwd block should be marked as fact, not hint."
+    )
+
+
 def test_planner_tool_output_does_not_leak_to_reviewer_prompt() -> None:
     """§11 anti-deception: planner conversation/tool output must NOT
     enter the reviewer LLM prompt bytes."""

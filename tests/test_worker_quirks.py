@@ -90,11 +90,17 @@ def test_testcmd_path_quirk_survives_80_char_clip_with_concrete_example() -> Non
     """
 
     hints = quirks_for("aider")
-    matching = [h for h in hints if "pytest -v" in h and "examples" in h]
+    # Bug F follow-up (2026-05-17 v0.4 attempt 7): the bad-form example
+    # was generalised from "examples/" (broken_calc-specific) to "<dir>/"
+    # so the quirk applies to any project layout, not just the fixture.
+    matching = [
+        h for h in hints
+        if "pytest -v" in h and ("<dir>" in h or "examples" in h)
+    ]
     assert matching, (
         "expected the test_command quirk's clipped human_summary to retain "
         "both the good form 'pytest -v' AND a recognizable bad form "
-        "involving 'examples/'; got: " + repr(hints)
+        "(either '<dir>/' or 'examples/'); got: " + repr(hints)
     )
     assert len(matching[0]) <= 80, (
         f"clipped hint exceeded _HINT_CHAR_BUDGET: {matching[0]!r}"
