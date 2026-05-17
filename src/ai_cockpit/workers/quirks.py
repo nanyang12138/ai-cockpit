@@ -82,10 +82,38 @@ _CURSOR_WORKSPACE_SCAN = WorkerQuirk(
     ),
 )
 
+# Surfaced by the 2026-05-17 v0.4 exit-gate attempt 3: the planner
+# emitted ``pytest examples/broken_calc -v`` as a slice-level
+# test_command, but the verifier runs with ``cwd=examples/broken_calc``
+# under ``--root examples/broken_calc``, so the command resolves to
+# ``cd examples/broken_calc && pytest examples/broken_calc -v`` →
+# exit 4 "file or directory not found". The quirk is worker-agnostic
+# (it's a planner-emission convention issue, not aider-specific) but
+# it shows up via the worker's verification commands, so we surface
+# it on every apply-capable worker bucket.
+_TESTCMD_PATH_RELATIVE_TO_CWD = WorkerQuirk(
+    id="verifier.test_command_path_relative_to_root",
+    human_summary=(
+        "test_commands run with cwd=project_root; never prefix paths "
+        "with the project_root itself (e.g. write 'pytest -v' not "
+        "'pytest examples/broken_calc -v')."
+    ),
+    criteria_to_avoid=(
+        "pytest <project_root_subdir> -v",
+        "ruff check <project_root>/<file>",
+        "python -m pytest examples/<fixture>/",
+    ),
+    replacement_hint=(
+        "Emit test_commands relative to the verifier's cwd (which is "
+        "always --root): 'pytest -v', 'ruff check .', 'python -m "
+        "pytest -q'. The verifier already cd's into --root."
+    ),
+)
+
 
 WORKER_QUIRKS: dict[str, tuple[WorkerQuirk, ...]] = {
-    "aider": (_AIDER_GITIGNORE,),
-    "cursor": (_CURSOR_WORKSPACE_SCAN,),
+    "aider": (_AIDER_GITIGNORE, _TESTCMD_PATH_RELATIVE_TO_CWD),
+    "cursor": (_CURSOR_WORKSPACE_SCAN, _TESTCMD_PATH_RELATIVE_TO_CWD),
     "stub": (),
 }
 
