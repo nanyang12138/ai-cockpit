@@ -71,6 +71,8 @@ def build_graph(
     interrupt_before: list[str] | None = None,
     worker_name: str = "stub",
     reviewer_llm: LLMProvider | None = None,
+    planner_system_override: str | None = None,
+    reviewer_system_override: str | None = None,
 ) -> Any:
     """Assemble and compile the LangGraph workflow.
 
@@ -94,10 +96,20 @@ def build_graph(
     effective_reviewer_llm = reviewer_llm if reviewer_llm is not None else llm
 
     builder.add_node("intake", intake_node)
-    builder.add_node("planner", make_planner_node(llm))  # type: ignore[arg-type]
+    builder.add_node(
+        "planner",
+        make_planner_node(  # type: ignore[arg-type]
+            llm, system_override=planner_system_override
+        ),
+    )
     builder.add_node("coder", make_coder_node(worker_name))  # type: ignore[arg-type]
     builder.add_node("verifier", verifier_node)
-    builder.add_node("reviewer", make_reviewer_node(effective_reviewer_llm))  # type: ignore[arg-type]
+    builder.add_node(
+        "reviewer",
+        make_reviewer_node(  # type: ignore[arg-type]
+            effective_reviewer_llm, system_override=reviewer_system_override
+        ),
+    )
     builder.add_node("decision", decision_node)
     builder.add_node("summary", summary_node)
 
@@ -137,6 +149,8 @@ def run_graph(
     resume: bool = False,
     worker_name: str = "stub",
     reviewer_llm: LLMProvider | None = None,
+    planner_system_override: str | None = None,
+    reviewer_system_override: str | None = None,
 ) -> TaskState:
     """Execute the graph end-to-end and return the final state.
 
@@ -157,7 +171,11 @@ def run_graph(
     if thread_id is None:
         # No checkpointing: behave exactly as v0.1 / step-1 did.
         graph = build_graph(
-            llm=llm, worker_name=worker_name, reviewer_llm=reviewer_llm
+            llm=llm,
+            worker_name=worker_name,
+            reviewer_llm=reviewer_llm,
+            planner_system_override=planner_system_override,
+            reviewer_system_override=reviewer_system_override,
         )
         state = initial_state(
             user_input=user_input,
@@ -180,6 +198,8 @@ def run_graph(
         graph = build_graph(
             llm=llm, checkpointer=saver, worker_name=worker_name,
             reviewer_llm=reviewer_llm,
+            planner_system_override=planner_system_override,
+            reviewer_system_override=reviewer_system_override,
         )
         if resume:
             final = graph.invoke(None, config=config)

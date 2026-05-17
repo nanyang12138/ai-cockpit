@@ -163,6 +163,28 @@ def _dirty_paths_outside_aider_allowlist(project_root: str) -> list[str]:
     return paths
 
 
+def _load_system_prompt_override(path: str | None, *, role: str) -> str | None:
+    """B.4: load + validate a system-prompt override, fail-closed on errors."""
+    if path is None:
+        return None
+    from ai_cockpit.llm.prompts_override import (
+        PromptOverrideError,
+        load_prompt_override,
+    )
+    try:
+        override = load_prompt_override(Path(path), role=role)  # type: ignore[arg-type]
+    except PromptOverrideError as exc:
+        raise click.UsageError(
+            f"{role}-system-prompt override rejected ({exc.rule}): {exc.path}"
+        ) from exc
+    click.echo(
+        f"info: {role}-system-prompt override loaded from {override.path} "
+        f"({len(override.body)} chars)",
+        err=True,
+    )
+    return override.body
+
+
 def _enforce_dirty_tree_precheck(project_root: str, *, worker_name: str = "aider") -> None:
     """A.7 / B.10c: refuse ``--worker {aider,cursor} --apply`` on a dirty tree."""
     dirty = _dirty_paths_outside_aider_allowlist(project_root)
@@ -963,6 +985,24 @@ def _resolve_plan_or_die(project_root: Path, plan_id: str) -> Plan:
               show_default=True,
               type=click.Choice(_REVIEWER_BACKEND_CHOICES, case_sensitive=False),
               help="Reviewer backend (see `ai-cockpit run --help` for B.10d details).")
+@click.option(
+    "--planner-system-prompt", "planner_system_prompt", default=None,
+    type=click.Path(dir_okay=False, resolve_path=True),
+    help=(
+        "B.4: override the planner system prompt. Plain UTF-8 file, "
+        "<=8 KiB, must contain 'strict JSON' and must not contain "
+        "'coder_result'."
+    ),
+)
+@click.option(
+    "--reviewer-system-prompt", "reviewer_system_prompt", default=None,
+    type=click.Path(dir_okay=False, resolve_path=True),
+    help=(
+        "B.4: override the reviewer system prompt. Plain UTF-8 file, "
+        "<=8 KiB, must contain both 'structured evidence' and 'do not "
+        "trust' (case-insensitive) and must not contain 'coder_result'."
+    ),
+)
 def plans_run_cmd(
     plan_id: str,
     slice_id: str,
@@ -974,6 +1014,8 @@ def plans_run_cmd(
     no_checkpoint: bool,
     dry_run: bool,
     reviewer_backend: str,
+    planner_system_prompt: str | None,
+    reviewer_system_prompt: str | None,
 ) -> None:
     project_root = Path(root).resolve()
     plan = _resolve_plan_or_die(project_root, plan_id)
@@ -1018,6 +1060,14 @@ def plans_run_cmd(
     reviewer_llm = _resolve_reviewer_backend(reviewer_backend, llm=llm)
     if reviewer_backend.lower() == "cursor":
         click.echo("info: reviewer=cursor (Cursor receives §9 evidence only)", err=True)
+
+    planner_override_body = _load_system_prompt_override(
+        planner_system_prompt, role="planner"
+    )
+    reviewer_override_body = _load_system_prompt_override(
+        reviewer_system_prompt, role="reviewer"
+    )
+
     run_graph(
         user_input=slice_to_user_input(plan, slice_obj),
         project_root=str(project_root),
@@ -1029,6 +1079,8 @@ def plans_run_cmd(
         thread_id=thread_id,
         worker_name=worker_name,
         reviewer_llm=reviewer_llm,
+        planner_system_override=planner_override_body,
+        reviewer_system_override=reviewer_override_body,
     )
 
 

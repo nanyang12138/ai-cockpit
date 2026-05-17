@@ -52,8 +52,13 @@ def build_planner_messages(
     tools: Iterable[PlannerTool],
     feedback: str | None = None,
     current_draft: object | None = None,
+    system_override: str | None = None,
 ) -> tuple[str, str]:
-    """Return ``(system, user)`` for a planner LLM call."""
+    """Return ``(system, user)`` for a planner LLM call.
+
+    ``system_override`` (B.4): replaces :data:`PLANNER_SYSTEM` verbatim
+    when supplied; CLI loader validates first.
+    """
 
     inventory = (
         "\n".join(f"- {t.name}: {t.description}" for t in tools)
@@ -76,4 +81,5 @@ def build_planner_messages(
         "Reply with JSON exactly matching this schema (no commentary):\n"
         f"{json.dumps(PLAN_DRAFT_SCHEMA, indent=2)}"
     )
-    return PLANNER_SYSTEM, "\n\n".join(parts)
+    system = system_override if system_override is not None else PLANNER_SYSTEM
+    return system, "\n\n".join(parts)

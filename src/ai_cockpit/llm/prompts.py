@@ -40,8 +40,18 @@ REVIEWER_SCHEMA = {
 }
 
 
-def build_planner_messages(*, idea: str, memory_context: str) -> tuple[str, str]:
-    """Return (system, user) messages for the planner LLM call."""
+def build_planner_messages(
+    *,
+    idea: str,
+    memory_context: str,
+    system_override: str | None = None,
+) -> tuple[str, str]:
+    """Return (system, user) messages for the planner LLM call.
+
+    ``system_override`` (B.4): when supplied, replaces
+    :data:`PLANNER_SYSTEM` verbatim; CLI validates via
+    :mod:`ai_cockpit.llm.prompts_override` first.
+    """
 
     user = (
         "Memory context (may be empty):\n"
@@ -51,7 +61,8 @@ def build_planner_messages(*, idea: str, memory_context: str) -> tuple[str, str]
         "Reply with JSON of this exact shape:\n"
         f"{json.dumps(PLANNER_SCHEMA, indent=2)}"
     )
-    return PLANNER_SYSTEM, user
+    system = system_override if system_override is not None else PLANNER_SYSTEM
+    return system, user
 
 
 def build_reviewer_evidence(state: dict[str, Any]) -> dict[str, Any]:
@@ -82,11 +93,17 @@ def build_reviewer_evidence(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_reviewer_messages(evidence: dict[str, Any]) -> tuple[str, str]:
+def build_reviewer_messages(
+    evidence: dict[str, Any],
+    *,
+    system_override: str | None = None,
+) -> tuple[str, str]:
     """Return (system, user) messages for the reviewer LLM call.
 
-    The caller is responsible for passing an evidence dict produced by
-    ``build_reviewer_evidence`` so ``coder_result`` cannot leak in.
+    Caller must pass a dict from :func:`build_reviewer_evidence` so
+    ``coder_result`` cannot leak in. ``system_override`` (B.4) replaces
+    :data:`REVIEWER_SYSTEM` verbatim when supplied; the §9 allow-list
+    is enforced by :mod:`ai_cockpit.llm.prompts_override` upstream.
     """
 
     user = (
@@ -95,7 +112,8 @@ def build_reviewer_messages(evidence: dict[str, Any]) -> tuple[str, str]:
         "Reply with JSON of this exact shape:\n"
         f"{json.dumps(REVIEWER_SCHEMA, indent=2)}"
     )
-    return REVIEWER_SYSTEM, user
+    system = system_override if system_override is not None else REVIEWER_SYSTEM
+    return system, user
 
 
 def parse_json_response(text: str) -> dict[str, Any] | None:
