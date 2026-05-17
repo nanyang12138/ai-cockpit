@@ -52,8 +52,18 @@ def build_planner_messages(
     tools: Iterable[PlannerTool],
     feedback: str | None = None,
     current_draft: object | None = None,
+    worker_hints: list[str] | None = None,
+    worker_name: str | None = None,
 ) -> tuple[str, str]:
-    """Return ``(system, user)`` for a planner LLM call."""
+    """Return ``(system, user)`` for a planner LLM call.
+
+    ``worker_hints`` (B.2) is an optional list of human-summary strings
+    from ``quirks_for(worker_name)``. Default ``None`` keeps every
+    existing call site byte-identical; the interactive REPL wiring
+    (CLI ``ai-cockpit plan --worker <name>``) is a follow-up gate.
+    """
+
+    from ai_cockpit.workers.quirks import format_worker_hints_block
 
     inventory = (
         "\n".join(f"- {t.name}: {t.description}" for t in tools)
@@ -72,6 +82,9 @@ def build_planner_messages(
         )
     if feedback:
         parts.append(f"User feedback for this turn:\n{feedback.strip()}")
+    hints_block = format_worker_hints_block(worker_hints, worker_name)
+    if hints_block is not None:
+        parts.append(hints_block)
     parts.append(
         "Reply with JSON exactly matching this schema (no commentary):\n"
         f"{json.dumps(PLAN_DRAFT_SCHEMA, indent=2)}"
