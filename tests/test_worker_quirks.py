@@ -35,6 +35,43 @@ def test_catalog_has_seed_entries_for_aider_and_cursor() -> None:
     assert "gitignore" in aider_entry.human_summary.lower()
 
 
+def test_catalog_carries_testcmd_path_quirk_on_apply_capable_workers() -> None:
+    """Bug B (2026-05-17 v0.4 gate attempt 3): planner emitted
+    ``pytest examples/broken_calc -v`` while the verifier cwd was
+    already ``examples/broken_calc``, yielding exit 4 "not found".
+
+    The quirk is worker-agnostic in nature (planner-emission convention)
+    but it shows up *through* the verifier commands, so apply-capable
+    backends (aider, cursor) carry it. ``stub`` does not — it never
+    runs verifier test_commands meaningfully.
+    """
+
+    quirk_ids = {
+        worker: {q.id for q in WORKER_QUIRKS[worker]}
+        for worker in ("aider", "cursor", "stub")
+    }
+    target = "verifier.test_command_path_relative_to_root"
+    assert target in quirk_ids["aider"], quirk_ids["aider"]
+    assert target in quirk_ids["cursor"], quirk_ids["cursor"]
+    assert target not in quirk_ids["stub"], quirk_ids["stub"]
+
+
+def test_testcmd_path_quirk_text_names_the_failure_mode() -> None:
+    """The human_summary must be specific enough that the planner LLM
+    actually changes its emission. A vague "use relative paths" is not
+    enough; the surfacing event proved the model emitted the project
+    root prefix because it sounded right in the slice docstring."""
+
+    for worker in ("aider", "cursor"):
+        for q in WORKER_QUIRKS[worker]:
+            if q.id == "verifier.test_command_path_relative_to_root":
+                summary_lower = q.human_summary.lower()
+                assert "cwd" in summary_lower or "project_root" in summary_lower
+                assert "pytest" in summary_lower
+                return
+    raise AssertionError("verifier.test_command_path quirk not found")
+
+
 def test_quirks_for_returns_lists_per_worker() -> None:
     assert quirks_for("aider")
     assert quirks_for("AIDER") == quirks_for("aider")
