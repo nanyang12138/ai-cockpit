@@ -296,10 +296,31 @@ reviewer).
 
 ### B.5 — v0.4 exit-gate definition
 
-v0.3 has no formal exit gate (v0.2's was spec §15). Candidate for
-v0.4: "ai-cockpit can iterate a failing test to green AND keep
-project memory consistent across runs". This must be defined by the
-user, not cron, because it sets the bar for declaring v0.4 done.
+**Status: contract authored 2026-05-17 (queue item #5 of the v0.3
+Cursor hardening + v0.4 startup window). Full design lives in
+`docs/B_5_CONTRACT.md`.** The locked gate definition (Q1–Q5,
+resolved with the user 2026-05-17 03:57 UTC):
+
+- **Capability proof:** `ai-cockpit` runs a complete `plan → plans
+  run → verifier → reviewer → memory` loop on a real git repo
+  (default `examples/broken_calc`) under real LLM credentials, with
+  ≥1 real-LLM-driven commit on master and ≥1 `done` suggestion
+  applied via `accept_suggestion`.
+- **Hard metrics (AND):** (1) total cost ≤ $1 USD; (2) total
+  wall-time ≤ 15 min; (3) human interventions = 0; (4) full test
+  suite green = existing master tests + ≥10 new v0.4 tests + the
+  5-test §9 anti-deception suite.
+- **Cursor backend:** optional bonus, not gate-blocking.
+- **Excluded:** cost auto-optimization, prompt auto-tuning,
+  daemon / UI / web app, multi-repo parallel run, A2A swarm,
+  automatic outbound email / Slack / PR comments, browser
+  automation, real-LLM-budget auto-expansion.
+
+Cron is authorized to land contract preparation gates (B.3, B.2,
+B.4 contracts, B.1 supersede) but the v0.4 exit-gate run itself
+is operator-driven and produces a separate `docs/V0_4_EXIT_EVIDENCE.md`
+PR. See `docs/B_5_CONTRACT.md` §11 (authorization) and §15
+(open-gate protocol) for the binding rules.
 
 ### B.6 — multi-step planner & plan artifact
 
