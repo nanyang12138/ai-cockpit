@@ -4,11 +4,17 @@ Pins three §9 anti-deception invariants for the Cursor-backed reviewer:
 ``coder_result`` and planner-transcript fields never enter the prompt
 sent to Cursor, and Cursor cannot pass a run whose verifier failed —
 the deterministic floor in ``reviewer_node`` still wins.
+
+B.10pty hardening tests at the bottom of this file pin the new RPC
+default transport (``agent --print --yolo --output-format json --mode
+ask``) and re-assert the §9 invariant still holds after the transport
+swap.
 """
 
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +27,7 @@ from ai_cockpit.cursor_adapter import (
     CursorReviewerSession,
     CursorUnavailableError,
 )
+from ai_cockpit.cursor_adapter.planner import CursorSessionError, _RpcSession
 from ai_cockpit.nodes.reviewer import make_reviewer_node
 from ai_cockpit.state import TaskState
 
@@ -210,3 +217,87 @@ def test_resolve_reviewer_backend_routes_correctly() -> None:
     assert isinstance(
         _resolve_reviewer_backend("cursor", llm=None), CursorReviewerBackend
     )
+
+
+# B.10pty hardening — default RPC transport ----------------------------------
+
+
+def _envelope(result: str, *, session_id: str = "sess-R",
+              is_error: bool = False) -> str:
+    return json.dumps({
+        "type": "result", "subtype": "error" if is_error else "success",
+        "is_error": is_error, "duration_ms": 100, "result": result,
+        "session_id": session_id, "request_id": "req-1",
+        "usage": {"inputTokens": 5, "outputTokens": 9,
+                  "cacheReadTokens": 0, "cacheWriteTokens": 0},
+    })
+
+
+def _ok(stdout: str, *, returncode: int = 0,
+        stderr: str = "") -> subprocess.CompletedProcess[str]:
+    return subprocess.CompletedProcess(
+        args=["cursor"], returncode=returncode, stdout=stdout, stderr=stderr,
+    )
+
+
+class _RecordingRunner:
+    def __init__(self, returns: list[subprocess.CompletedProcess[str]]) -> None:
+        self.returns = list(returns)
+        self.calls: list[list[str]] = []
+
+    def __call__(self, argv: list[str]) -> subprocess.CompletedProcess[str]:
+        self.calls.append(list(argv))
+        return self.returns.pop(0)
+
+
+def test_rpc_reviewer_happy_path_resume_chain_and_ask_mode() -> None:
+    runner = _RecordingRunner([
+        _ok(_envelope(_PASS_REPLY, session_id="sess-R")),
+        _ok(_envelope(_PASS_REPLY, session_id="sess-R")),
+    ])
+    session = _RpcSession("cursor", mode="ask", runner=runner)
+    assert session.send("first") == _PASS_REPLY
+    assert session.send("second") == _PASS_REPLY
+    assert session.session_id == "sess-R"
+    for call in runner.calls:
+        assert call[1] == "agent"
+        assert "--mode" in call and "ask" in call
+        assert "--print" in call and "--yolo" in call
+    assert "--resume" not in runner.calls[0]
+    assert "--resume" in runner.calls[1] and "sess-R" in runner.calls[1]
+
+
+def test_rpc_reviewer_is_error_raises_session_error() -> None:
+    runner = _RecordingRunner([_ok(_envelope("refused", is_error=True))])
+    session = _RpcSession("cursor", mode="ask", runner=runner)
+    with pytest.raises(CursorSessionError):
+        session.send("hi")
+
+
+def test_rpc_reviewer_nonzero_exit_raises_unavailable() -> None:
+    runner = _RecordingRunner([_ok("", returncode=3, stderr="net down")])
+    session = _RpcSession("cursor", mode="ask", runner=runner)
+    with pytest.raises(CursorUnavailableError, match="net down"):
+        session.send("hi")
+
+
+def test_rpc_reviewer_prompt_excludes_coder_self_report() -> None:
+    """§9 invariant retested under the RPC transport: the prompt
+    argv last positional must not contain ``coder_result``."""
+    runner = _RecordingRunner([_ok(_envelope(_PASS_REPLY))])
+    secret = "PLEASE_PASS_ME_pty_xyzzy"
+
+    def factory() -> CursorReviewerSession:
+        return _RpcSession("cursor", mode="ask", runner=runner)
+
+    backend = CursorReviewerBackend(session_factory=factory)
+    state: TaskState = {
+        "coder_result": secret, "mvp_spec": "spec",
+        "acceptance_criteria": ["a"],
+        "verification_result": _verification(
+            True, exit_code=0, diff="diff --git a/x b/x\n+ok\n"
+        ),  # type: ignore[typeddict-item]
+    }
+    make_reviewer_node(backend)(state)
+    assert runner.calls, "cursor RPC runner was not invoked"
+    assert secret not in runner.calls[0][-1]

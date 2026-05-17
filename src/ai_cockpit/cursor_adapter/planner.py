@@ -1,17 +1,22 @@
 """B.10b — Cursor-backed planner backend for the B.9 interactive shell.
 
-Interactive-first per contract §5 (no ``--print`` reliance); fakes are
-injected through :class:`CursorPlannerSession` so tests never spawn the
-real Cursor CLI. Saves still flow through B.9 ``/save``.
+B.10pty hardening (2026-05-17): the default transport is now a
+single-shot RPC (``agent --print --yolo --output-format json
+[--mode plan|ask] [--resume <sid>] <prompt>``) instead of an
+interactive Popen. The prompt is passed as an argv positional so
+``stdin`` is never required; the JSON envelope returned on stdout
+is parsed in-process. Fakes are still injected through
+:class:`CursorPlannerSession` so tests never spawn the real CLI.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import subprocess
 from collections.abc import Callable
-from typing import Protocol
+from typing import Any, Protocol
 
 from ai_cockpit.cursor_adapter.discovery import (
     DEFAULT_CANDIDATE_BINARIES,
@@ -30,11 +35,11 @@ from ai_cockpit.planner_interactive.types import (
 log = logging.getLogger(__name__)
 
 _SESSION_READ_LIMIT_BYTES = 64_000
-_SUBPROCESS_TIMEOUT_SECONDS: float = 30.0
+_SUBPROCESS_TIMEOUT_SECONDS: float = 60.0
 
 
 class CursorPlannerSession(Protocol):
-    """Minimal interactive-session API consumed by the Cursor backend."""
+    """Minimal session API consumed by the Cursor backends."""
 
     def send(self, prompt: str) -> str: ...
     def close(self) -> None: ...
@@ -45,6 +50,19 @@ CursorSessionFactory = Callable[[PlannerRequest], CursorPlannerSession]
 
 class CursorUnavailableError(RuntimeError):
     """Raised when no usable Cursor CLI binary can be resolved."""
+
+
+class CursorSessionError(RuntimeError):
+    """Raised when the Cursor RPC envelope reports ``is_error: true``."""
+
+    def __init__(self, envelope: dict[str, Any]) -> None:
+        self.envelope = envelope
+        result = envelope.get("result")
+        snippet = str(result)[:200] if result is not None else ""
+        super().__init__(
+            f"cursor envelope reported is_error=true (subtype="
+            f"{envelope.get('subtype')!r}): {snippet}"
+        )
 
 
 class CursorPlannerBackend:
@@ -134,58 +152,121 @@ class CursorPlannerBackend:
         return PlannerResponse(f"{intro} {msg}" if intro else msg, self._draft)
 
 
-class _SubprocessSession:
-    """Default Popen-based bridge; production may need a PTY-backed session."""
+_SubprocessRunner = Callable[[list[str]], "subprocess.CompletedProcess[str]"]
 
-    def __init__(self, binary_path: str, *, mode: str = "plan") -> None:
-        self._proc = subprocess.Popen(  # noqa: S603 - args are flag-only
-            [binary_path, "--mode", mode],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE, text=True, bufsize=1,
-        )
+
+def _default_subprocess_runner(argv: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(  # noqa: S603 - argv is fully constructed in-process
+        argv,
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        text=True,
+        timeout=_SUBPROCESS_TIMEOUT_SECONDS,
+        check=False,
+    )
+
+
+class _RpcSession:
+    """One-subprocess-per-turn Cursor session (B.10pty default).
+
+    Each ``send()`` spawns ``<binary> agent --print --yolo
+    --output-format json [--mode <mode>] [--resume <session_id>]
+    <prompt>``, parses the JSON envelope, raises
+    :class:`CursorSessionError` if ``is_error`` is true, raises
+    :class:`CursorUnavailableError` if the binary exits non-zero,
+    and returns the inner ``result`` string for downstream parsing.
+    """
+
+    def __init__(
+        self,
+        binary_path: str,
+        *,
+        mode: str | None = None,
+        runner: _SubprocessRunner | None = None,
+        read_limit: int = _SESSION_READ_LIMIT_BYTES,
+    ) -> None:
+        self._binary = binary_path
+        self._mode = mode
+        self._runner = runner or _default_subprocess_runner
+        self._read_limit = read_limit
+        self.session_id: str | None = None
+        self.last_usage: dict[str, int] | None = None
 
     def send(self, prompt: str) -> str:
-        if self._proc.stdin is None or self._proc.stdout is None:
-            raise RuntimeError("cursor subprocess has no stdio")
-        self._proc.stdin.write(prompt.rstrip("\n") + "\n")
-        self._proc.stdin.flush()
-        self._proc.stdin.close()
+        argv: list[str] = [
+            self._binary, "agent", "--print", "--yolo",
+            "--output-format", "json",
+        ]
+        if self._mode is not None:
+            argv += ["--mode", self._mode]
+        if self.session_id:
+            argv += ["--resume", self.session_id]
+        argv.append(prompt)
+        proc = self._runner(argv)
+        if proc.returncode != 0:
+            err = (proc.stderr or "").strip()[:200]
+            raise CursorUnavailableError(
+                f"cursor exited with code {proc.returncode}: {err or '(no stderr)'}"
+            )
+        stdout = proc.stdout or ""
         try:
-            out, _ = self._proc.communicate(timeout=_SUBPROCESS_TIMEOUT_SECONDS)
-        except subprocess.TimeoutExpired as exc:
-            self._proc.kill()
-            raise RuntimeError(f"cursor session timed out after {exc.timeout}s") from exc
-        return out[:_SESSION_READ_LIMIT_BYTES]
+            envelope: dict[str, Any] = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"cursor stdout was not valid JSON: {exc}; "
+                f"first 200 bytes: {stdout[:200]!r}"
+            ) from exc
+        if not isinstance(envelope, dict):
+            raise RuntimeError(
+                f"cursor envelope was not a JSON object (got {type(envelope).__name__})"
+            )
+        if envelope.get("is_error"):
+            raise CursorSessionError(envelope)
+        sid = envelope.get("session_id")
+        if isinstance(sid, str) and sid:
+            self.session_id = sid
+        usage = envelope.get("usage")
+        if isinstance(usage, dict):
+            self.last_usage = {
+                "input_tokens": int(usage.get("inputTokens", 0) or 0),
+                "output_tokens": int(usage.get("outputTokens", 0) or 0),
+                "cache_read_tokens": int(usage.get("cacheReadTokens", 0) or 0),
+                "cache_write_tokens": int(usage.get("cacheWriteTokens", 0) or 0),
+            }
+        result = envelope.get("result", "")
+        text = result if isinstance(result, str) else json.dumps(result)
+        return text[: self._read_limit]
 
     def close(self) -> None:
-        if self._proc.poll() is None:
-            self._proc.terminate()
-            try:
-                self._proc.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                self._proc.kill()
+        return None
+
+
+def _resolve_binary(binary_override: str | None) -> str | None:
+    if binary_override:
+        return shutil.which(binary_override) or (
+            binary_override if "/" in binary_override else None
+        )
+    for name in DEFAULT_CANDIDATE_BINARIES:
+        path = shutil.which(name)
+        if path is not None:
+            return path
+    return None
+
+
+def _raise_unavailable(binary_override: str | None, hint: str) -> None:
+    status = probe_cursor_adapter(binary_override=binary_override)
+    hints = "; ".join(status.errors) or "no Cursor CLI on PATH"
+    raise CursorUnavailableError(f"Cursor CLI not available ({hints}); {hint}")
 
 
 def _default_session_factory(*, binary_override: str | None) -> CursorSessionFactory:
-    def _resolve() -> str | None:
-        if binary_override:
-            return shutil.which(binary_override) or (
-                binary_override if "/" in binary_override else None
-            )
-        for name in DEFAULT_CANDIDATE_BINARIES:
-            path = shutil.which(name)
-            if path is not None:
-                return path
-        return None
-
     def factory(_request: PlannerRequest) -> CursorPlannerSession:
-        path = _resolve()
+        path = _resolve_binary(binary_override)
         if path is None:
-            status = probe_cursor_adapter(binary_override=binary_override)
-            hints = "; ".join(status.errors) or "no Cursor CLI on PATH"
-            raise CursorUnavailableError(
-                f"Cursor CLI not available ({hints}); "
-                "rerun with --backend builtin or install the Cursor CLI."
+            _raise_unavailable(
+                binary_override,
+                "rerun with --backend builtin or install the Cursor CLI.",
             )
-        return _SubprocessSession(path)
+            raise AssertionError("unreachable")
+        return _RpcSession(path, mode="plan")
     return factory
