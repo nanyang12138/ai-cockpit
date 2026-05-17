@@ -129,6 +129,25 @@ def test_flag_advertisements_tri_state(
     assert modes_subset.issubset(set(status.supported_modes))
 
 
+def test_parse_modes_handles_choices_continuation(empty_path: Path) -> None:
+    """Real cursor-agent --help wraps ``--mode <mode>`` and lists the
+    ``(choices: "plan", "ask")`` clause on the next indented line.
+    The parser must read the continuation line(s) of the ``--mode``
+    block, not just the line that contains the literal ``--mode``.
+    """
+    _make_fake_binary(empty_path, "agent")
+    help_text = (
+        "Options:\n"
+        "  --mode <mode>\n"
+        '      (choices: "plan", "ask")\n'
+        "  --print               Non-interactive print\n"
+    )
+    status = probe_cursor_adapter(runner=_fake_runner({
+        ("--version",): (0, "agent 1.0\n", ""), ("--help",): (0, help_text, ""),
+    }))
+    assert set(status.supported_modes) == {"plan", "ask"}
+
+
 def test_render_and_cli_unavailable(empty_path: Path) -> None:
     rendered = "\n".join(_render_cursor_status(CursorAdapterStatus(
         binary_name="agent", binary_path="/usr/local/bin/agent", available=True,

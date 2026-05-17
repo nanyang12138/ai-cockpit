@@ -93,14 +93,41 @@ def _parse_version(text: str | None) -> str | None:
 
 
 def _parse_modes(help_text: str | None) -> tuple[str, ...]:
-    """Pick ``--mode`` values only from lines that mention ``--mode``."""
+    """Pick ``--mode`` values from each ``--mode`` block.
+
+    A block is the line that mentions ``--mode`` plus any continuation
+    lines that are indented deeper than the ``--mode`` line and do not
+    introduce another ``--flag``. This matches both compact help
+    (``--mode plan|ask``) and the cursor-agent style where the choices
+    appear on a wrapped continuation line such as
+    ``--mode <mode>\\n      (choices: "plan", "ask")``.
+    """
     if not help_text:
         return ()
     seen: dict[str, None] = {}
-    for line in help_text.splitlines():
+    lines = help_text.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i]
         if "--mode" in line.lower():
+            mode_indent = len(line) - len(line.lstrip())
             for tok in _MODE_TOKEN_RE.findall(line):
                 seen.setdefault(tok.lower(), None)
+            j = i + 1
+            while j < len(lines):
+                nxt = lines[j]
+                stripped = nxt.lstrip()
+                if not stripped:
+                    break
+                nxt_indent = len(nxt) - len(stripped)
+                if nxt_indent <= mode_indent or stripped.startswith("--"):
+                    break
+                for tok in _MODE_TOKEN_RE.findall(nxt):
+                    seen.setdefault(tok.lower(), None)
+                j += 1
+            i = j
+        else:
+            i += 1
     return tuple(seen)
 
 

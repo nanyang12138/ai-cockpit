@@ -31,8 +31,10 @@ HELP_TEXT = """Commands:
   /revise <feedback> Record feedback for the planner.
   /tools             List planner tools (B.9b).
   /save [path]       Validate and save the current draft.
-  /abort             Exit without writing.
+  /abort             Exit without writing (aliases: /quit, /exit, /q).
 """
+
+_EXIT_COMMANDS: frozenset[str] = frozenset({"/abort", "/quit", "/exit", "/q"})
 
 
 def build_planner_backend(request: PlannerRequest) -> PlannerBackend:
@@ -158,7 +160,7 @@ def run_interactive_planner(
                 continue
             click.echo(f"saved plan: {target}")
             return
-        elif command == "/abort":
+        elif command in _EXIT_COMMANDS:
             click.echo("aborted; no plan written")
             return
         elif command.startswith("/"):
