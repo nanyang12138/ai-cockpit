@@ -82,8 +82,8 @@ _CURSOR_WORKSPACE_SCAN = WorkerQuirk(
     ),
 )
 
-# Surfaced by the 2026-05-17 v0.4 exit-gate attempt 3: the planner
-# emitted ``pytest examples/broken_calc -v`` as a slice-level
+# Surfaced by the 2026-05-17 v0.4 exit-gate attempts 3 + 4: the
+# planner emitted ``pytest examples/broken_calc -v`` as a slice-level
 # test_command, but the verifier runs with ``cwd=examples/broken_calc``
 # under ``--root examples/broken_calc``, so the command resolves to
 # ``cd examples/broken_calc && pytest examples/broken_calc -v`` →
@@ -91,12 +91,22 @@ _CURSOR_WORKSPACE_SCAN = WorkerQuirk(
 # (it's a planner-emission convention issue, not aider-specific) but
 # it shows up via the worker's verification commands, so we surface
 # it on every apply-capable worker bucket.
+#
+# Ergonomics note (attempt 4 / 5 calibration, PR #81): ``human_summary``
+# MUST stay under ``_HINT_CHAR_BUDGET`` (80 chars) **including the
+# concrete good→bad example**, because the clip in ``_clip()`` would
+# otherwise truncate exactly the example that makes the hint
+# behaviour-changing. The first version of this quirk landed at 153
+# chars and got clipped to 80 just before the example, which left the
+# planner LLM with only the abstract "don't prefix with project_root"
+# fragment — interpreted as "improve test discovery" instead of "drop
+# the path prefix". The current phrasing is 79 chars including the
+# concrete "'pytest -v' not 'pytest <root> -v'" pair.
 _TESTCMD_PATH_RELATIVE_TO_CWD = WorkerQuirk(
     id="verifier.test_command_path_relative_to_root",
     human_summary=(
-        "test_commands run with cwd=project_root; never prefix paths "
-        "with the project_root itself (e.g. write 'pytest -v' not "
-        "'pytest examples/broken_calc -v')."
+        "test_commands cwd=root; write 'pytest -v' not "
+        "'pytest examples/<dir> -v'."
     ),
     criteria_to_avoid=(
         "pytest <project_root_subdir> -v",
