@@ -16,6 +16,10 @@ user session) can finish without ambiguity.
 
 If anything below is unclear, STOP and ask the user — do not guess.
 
+> **v0.5 roadmap (draft):** see `docs/V0_5_ROADMAP.md` — 9
+> agent-paradigm deficiencies, per-row open questions, no v0.5
+> implementation gate opens until reviewed + answered.
+
 ## Section A — cron-safe backlog (overnight queue)
 
 These items are deterministic, read-only-leaning, and have no
