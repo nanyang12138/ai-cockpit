@@ -26,6 +26,13 @@ from ai_cockpit.cursor_adapter.worker import (
     CursorWorkerSession,
     CursorWorkerSessionFactory,
 )
+from ai_cockpit.cursor_adapter.writer import (
+    CursorWriterBackend,
+    CursorWriterSession,
+    CursorWriterSessionFactory,
+    WriterDraftRequest,
+    WriterDraftResult,
+)
 
 __all__ = [
     "DEFAULT_CANDIDATE_BINARIES",
@@ -40,5 +47,6 @@ __all__ = [
     "CursorWorker",
     "CursorWorkerSession",
     "CursorWorkerSessionFactory",
-    "probe_cursor_adapter",
+    "CursorWriterBackend", "CursorWriterSession", "CursorWriterSessionFactory",
+    "WriterDraftRequest", "WriterDraftResult", "probe_cursor_adapter",
 ]
