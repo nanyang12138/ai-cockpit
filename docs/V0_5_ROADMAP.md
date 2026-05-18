@@ -60,7 +60,7 @@ is required.
 | 3 | `prompt-coverage`     | golden-prompt CI + nightly real-LLM probe (both on per user 15:08) — **CONTRACT LOCKED** at `docs/V0_5_ROW_3_PROMPT_COVERAGE_CONTRACT.md` | ≤6        | ≤300    | none       |
 | 5 | `planner-self-check`  | deterministic static lint on planner output before coder runs — **CONTRACT LOCKED** at `docs/V0_5_ROW_5_PLANNER_SELF_CHECK_CONTRACT.md` | ≤4        | ≤200    | none       |
 | 6 | `plan-cwd-context`    | `Plan.assumed_cwd` field + mismatch warning at `plans run` — **CONTRACT LOCKED** at `docs/V0_5_ROW_6_PLAN_CWD_CONTEXT_CONTRACT.md` | ≤4        | ≤120    | none       |
-| 10 | `cli-ergonomics-project-config` | `.ai-cockpit/config.yaml` carrying per-project flag defaults (+ optional `ai-cockpit init` wizard in sub-gate b) so daily invocations become 1-flag instead of 6-flag — **CONTRACT DRAFT, Q-lock pending** at `docs/V0_5_ROW_10_CLI_ERGONOMICS_CONTRACT.md` | ≤7 combined (split a+b) | ≤400 combined | none (orthogonal to graph rows) |
+| 10 | `cli-ergonomics-project-config` | `.ai-cockpit/config.yaml` carrying per-project flag defaults (+ optional `ai-cockpit init` wizard in sub-gate b) so daily invocations become 1-flag instead of 6-flag — **CONTRACT LOCKED** at `docs/V0_5_ROW_10_CLI_ERGONOMICS_CONTRACT.md`; impl-a gate granted 2026-05-18 05:24 UTC | ≤7 combined (split a+b) | ≤400 combined | none (orthogonal to graph rows) |
 
 ### Bucket B: v0.6 candidates (defer, need v0.5 evidence first)
 
