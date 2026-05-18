@@ -153,6 +153,7 @@ def run_graph(
     reviewer_llm: LLMProvider | None = None,
     planner_system_override: str | None = None,
     reviewer_system_override: str | None = None,
+    output_format: str | None = None,
 ) -> TaskState:
     """Execute the graph end-to-end and return the final state.
 
@@ -186,6 +187,7 @@ def run_graph(
             max_loops=max_loops,
             test_commands=test_commands,
             dry_run=dry_run,
+            output_format=output_format,
         )
         final = graph.invoke(state, config={"recursion_limit": recursion_limit})
         return final  # type: ignore[return-value]
@@ -213,6 +215,7 @@ def run_graph(
                 max_loops=max_loops,
                 test_commands=test_commands,
                 dry_run=dry_run,
+                output_format=output_format,
             )
             final = graph.invoke(state, config=config)
     return final  # type: ignore[return-value]
