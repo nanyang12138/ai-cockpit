@@ -1,9 +1,10 @@
-# V0.5 Row #10 — `cli-ergonomics-project-config` contract (v0.1, DRAFT — Q-table pending user lock)
+# V0.5 Row #10 — `cli-ergonomics-project-config` contract (v0.1, LOCKED)
 
-Status: **draft, NOT locked.** The §3 Q-table records cron's
-recommendations but is **not** authorised. User must lock the
-Q-answers (per row, or "accept all cron recommendations") before
-this document becomes the implementation gate.
+Status: **contract locked.** User authorised the §3 Q-answers on
+2026-05-18 05:24 UTC ("accept all cron recommendations
+verbatim, open-gate v0.5-row-10-impl-a"). The same message also
+opens the implementation-a gate; impl-b remains gated on impl-a's
+merge per §12.
 
 > Pure-documentation deliverable: 2 files / ≤350 net LOC. No code
 > under `src/`, no tests touched.
@@ -77,20 +78,25 @@ depend on for prioritisation calibration.
 | Backwards compatibility | EXECUTION_RULES | Existing 301-test baseline stays 301-passing without modification. No CLI-flag signature change. |
 | ≤8 files / ≤400 net LOC per PR | EXECUTION_RULES | Contract (this PR): 2 files / ≤350. Impl (future): split a (≤4 / ≤200) + b (≤3 / ≤180). |
 
-## 3. Open questions (cron recommendations — awaiting user lock)
+## 3. Resolved decisions (user-locked 2026-05-18 05:24 UTC)
 
-| # | Question | Cron recommendation | User answer |
+User answer is **"accept all cron recommendations verbatim"** —
+applied uniformly to Q1–Q10. The column is filled in long form
+below for downstream readers who arrive at the locked contract
+without the original chat transcript.
+
+| # | Question | Locked decision | Rationale |
 |---|---|---|---|
-| Q1 | Config file path | `.ai-cockpit/config.yaml` — project-scoped, alongside existing `workflows/` and `memory/`. Not user-scoped (no XDG). | |
-| Q2 | Format | YAML (matches workflow files; no new parser dependency). | |
-| Q3 | Precedence order | **CLI flag > workflow YAML > project config > built-in default.** First layer that explicitly sets a key wins. | |
-| Q4 | When `config.yaml` is absent | **Byte-identical to current master.** No auto-detection from installed deps. Convenience is opt-in only. | |
-| Q5 | LLM credentials in config | **Forbidden.** Loader raises on any `LLM_*` / `ANTHROPIC_*` / `OPENAI_*` key. Env-only, as today. | |
-| Q6 | `apply: true` allowed in config? | **Allowed**, but loader emits a stderr warning on every load reminding the operator that aider/cursor will modify files by default. Removing the row defeats the point. | |
-| Q7 | Config committed to git? | **Yes** (`config.yaml` is project-shared). Optional `config.local.yaml` for per-operator overrides — same schema, gitignored. Loader appends `**/.ai-cockpit/config.local.yaml` to `.gitignore` idempotently on bootstrap. | |
-| Q8 | Workflow simple-name? | **Yes:** `workflow: bug-fix` (no `/`, no `.yaml`/`.yml` suffix) resolves to `<root>/.ai-cockpit/workflows/bug-fix.yaml`. Literal paths still work. | |
-| Q9 | Ship `ai-cockpit init` in same PR as loader? | **No.** Sub-gate a = loader + CLI fallback + loader tests. Sub-gate b = `init` wizard + tests. Independently mergeable; b depends on a. | |
-| Q10 | Per-subcommand defaults (separate `run.defaults`, `plan.defaults`)? | **Out of scope.** Single `defaults:` block; loader silently ignores irrelevant keys per subcommand. Revisit if real evidence accumulates. | |
+| Q1 | Config file path | `.ai-cockpit/config.yaml` — project-scoped, alongside existing `workflows/` and `memory/`. Not user-scoped (no XDG). | Consistent with the existing `.ai-cockpit/` convention; the tool is intentionally per-project. |
+| Q2 | Format | YAML (matches workflow files; no new parser dependency). | Operators already author `.ai-cockpit/workflows/*.yaml`; reusing YAML avoids a new parser dependency. |
+| Q3 | Precedence order | **CLI flag > workflow YAML > project config > built-in default.** First layer that explicitly sets a key wins. | Standard 12-factor. CLI is operator's explicit intent (highest). Workflow YAML is task-shape-specific. Config is project-stable preference. Built-in is the safe v0.1 default. |
+| Q4 | When `config.yaml` is absent | **Byte-identical to current master.** No auto-detection from installed deps. Convenience is opt-in only. | Auto-detection (e.g. "if `aider` is installed, default `--worker aider`") would surprise operators who installed aider for an unrelated reason. Convention-over-configuration is the wrong default for a tool that mutates code. |
+| Q5 | LLM credentials in config | **Forbidden.** Loader raises on any `LLM_*` / `ANTHROPIC_*` / `OPENAI_*` key. Env-only, as today. | Credentials in committed files = leak. Same trust model as today's README. |
+| Q6 | `apply: true` allowed in config? | **Allowed**, but loader emits a stderr warning on every load reminding the operator that aider/cursor will modify files by default. | Forbidding `apply` in config defeats the row (the whole point is removing redundant flag typing on real runs). Warning preserves audit trail. |
+| Q7 | Config committed to git? | **Yes** (`config.yaml` is project-shared). Optional `config.local.yaml` for per-operator overrides — same schema, gitignored. Loader appends `**/.ai-cockpit/config.local.yaml` to `.gitignore` idempotently on bootstrap. | Sharing baseline across the team is a feature; personal tweaks (e.g. one operator prefers `cursor` over `aider`) belong in the local override. |
+| Q8 | Workflow simple-name? | **Yes:** `workflow: bug-fix` (no `/`, no `.yaml`/`.yml` suffix) resolves to `<root>/.ai-cockpit/workflows/bug-fix.yaml`. Literal paths still work. | Cleaner config (`workflow: bug-fix` reads naturally) without breaking existing path usage. |
+| Q9 | Ship `ai-cockpit init` in same PR as loader? | **No.** Sub-gate a = loader + CLI fallback + loader tests. Sub-gate b = `init` wizard + tests. Independently mergeable; b depends on a. | Smaller blast radius per PR; if the loader proves controversial, `init` is not blocked on anything that's not already on master. |
+| Q10 | Per-subcommand defaults (separate `run.defaults`, `plan.defaults`)? | **Out of scope.** Single `defaults:` block; loader silently ignores irrelevant keys per subcommand. Revisit if real evidence accumulates. | Per-subcommand sections add config-schema complexity for a benefit not yet demonstrated. |
 
 ## 4. Data model
 
@@ -278,29 +284,31 @@ operators can still hand-author config per §4.1.
 
 ## 11. Authorisation & operating rhythm
 
-Per the 2026-05-18 03:23 UTC user authorisation:
+Authorisation timeline:
 
-1. **Contract draft only.** This PR ships this file + ROADMAP
-   pointer. No `src/` touched, no Q-answer locked.
-2. **Q-lock signal required before any impl gate.** User
-   responds with explicit Q-answers (or "accept all cron
-   recommendations"). Cron updates §3 "User answer" column and
-   flips status header from `DRAFT` to `LOCKED` in a follow-up
-   doc-only PR. Impl gates a and b are blocked until that PR
-   merges.
-3. **Per-spec rhythm.** `docs/V0_5_ROADMAP.md` §5 already
-   gates v0.5 rows on V0_4 evidence merged on master (now
-   satisfied via PR #89) AND per-row `open-gate` signals.
+| When | Signal | Authorised action | Status |
+|---|---|---|---|
+| 2026-05-18 03:23 UTC | "可以 先起草 contract 然后再决定要不要开始" | Contract DRAFT (PR #99) — doc-only, ≤350 LOC, no `src/` touch, no Q-lock | done — merged to master |
+| 2026-05-18 05:24 UTC | "accept all cron recommendations verbatim, open-gate v0.5-row-10-impl-a" | (a) Lock PR — doc-only, flips status DRAFT→LOCKED, fills §3 User-answer column. (b) impl-a PR — `src/` changes ≤4 files / ≤200 LOC per §6. | (a) THIS PR. (b) follow-up PR after this one merges. |
+| TBD | `open-gate v0.5-row-10-impl-b` | impl-b PR — `init` wizard, ≤3 files / ≤180 LOC per §6 | NOT granted; depends on impl-a merged |
+
+Per-spec rhythm: `docs/V0_5_ROADMAP.md` §5 gates v0.5 rows on
+V0_4 evidence merged on master (satisfied via PR #89) AND per-row
+`open-gate` signals. Both conditions met for impl-a as of the
+2026-05-18 05:24 UTC signal.
 
 ## 12. Open-gate protocol
 
 ```text
 open-gate v0.5-row-10-contract              # granted 2026-05-18 03:23 UTC;
-                                            # this PR is the deliverable.
-open-gate v0.5-row-10-lock                  # NOT granted — needs §3 Q1–Q10
-                                            # answers (or "accept all cron
-                                            # recommendations").
-open-gate v0.5-row-10-impl-a                # NOT until row-10-lock merged.
+                                            # delivered via PR #99 (merged).
+open-gate v0.5-row-10-lock                  # granted 2026-05-18 05:24 UTC
+                                            # ("accept all cron
+                                            # recommendations verbatim");
+                                            # THIS PR is the deliverable.
+open-gate v0.5-row-10-impl-a                # granted 2026-05-18 05:24 UTC;
+                                            # impl PR follows after this
+                                            # lock PR merges.
 open-gate v0.5-row-10-impl-b                # NOT until impl-a merged.
 
 open-gate v0.5-row-10-credentials-in-config # NEVER — §2 Q5 invariant.
@@ -308,10 +316,9 @@ open-gate v0.5-row-10-auto-detect-defaults  # NEVER — §2 Q4 invariant.
 open-gate v0.5-row-10-user-scoped-config    # NEVER in v0.5; future row.
 ```
 
-A future `open-gate v0.5-row-10-lock` signal must explicitly
-reference §3's Q1–Q10 (with per-row answers or "accept all
-cron recommendations verbatim"). Otherwise cron stops with an
-OQ entry per `AUTOMATION_PROMPT.md` §4.
+A future `open-gate v0.5-row-10-impl-b` signal must reference
+this row by name. Once impl-b ships, the row is complete and the
+gate sequence is closed.
 
 ## 13. Cross-links
 
