@@ -27,6 +27,7 @@ from ai_cockpit.cursor_adapter import (
     CursorReviewerBackend,
     probe_cursor_adapter,
 )
+from ai_cockpit.cursor_adapter.chat import spawn_cursor_chat
 from ai_cockpit.graph import run_graph, slice_to_user_input
 from ai_cockpit.llm import LLMProvider, build_llm
 from ai_cockpit.memory.suggestions import (
@@ -892,6 +893,132 @@ def status_cmd(root: str) -> None:
                 else ""
             )
             click.echo(f"  {key}: {value!r} ({src}){extra}")
+
+
+# ---------------------------------------------------------------------------
+# chat subcommand (v0.5 row #11 sub-gate a)
+# ---------------------------------------------------------------------------
+
+
+@main.command(
+    name="chat",
+    help=(
+        "Open Cursor's interactive chat (or one-shot Q&A) with this "
+        "project's memory pre-loaded as system prompt. Read-only by "
+        "default; use `ai-cockpit run` for code modifications."
+    ),
+)
+@click.argument("question", nargs=-1, required=False)
+@click.option(
+    "--root", "root", default=".", show_default=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+    help="Project root whose memory and config are loaded.",
+)
+@click.option(
+    "--backend",
+    "backend",
+    default="cursor",
+    show_default=True,
+    type=click.Choice(["cursor", "builtin"], case_sensitive=False),
+    help=(
+        "'cursor' spawns the local Cursor CLI (default). 'builtin' is "
+        "v0.5 row #11 sub-gate b and not yet implemented; passing it "
+        "now prints a clean error pointing at sub-gate b."
+    ),
+)
+@click.option(
+    "--binary",
+    "binary_override",
+    default=None,
+    help=(
+        "Pin a Cursor binary name/path (overrides auto-discovery of "
+        "'agent' -> 'cursor-agent' -> 'cursor' on PATH)."
+    ),
+)
+@click.option(
+    "--no-track-cost",
+    "no_track_cost",
+    is_flag=True,
+    default=False,
+    help=(
+        "Skip the cost-dashboard row for this chat session. Sub-gate b "
+        "ships the actual cost integration; sub-gate a accepts the "
+        "flag for forward-compatibility but does NOT write a cost row."
+    ),
+)
+def chat_cmd(
+    question: tuple[str, ...],
+    root: str,
+    backend: str,
+    binary_override: str | None,
+    no_track_cost: bool,
+) -> None:
+    """Spawn cursor's chat (interactive or one-shot)."""
+    if backend.lower() == "builtin":
+        raise click.UsageError(
+            "--backend builtin requires v0.5 row #11 sub-gate b, which "
+            "is not yet implemented. For now use --backend cursor (the "
+            "default) or invoke your LLM directly. Send "
+            "'open-gate v0.5-row-11-impl-b' to authorise the builtin "
+            "backend PR."
+        )
+
+    project_root = str(Path(root).resolve())
+    question_text = " ".join(question).strip() if question else None
+
+    # Sub-gate a does not write to the cost DB; --no-track-cost is
+    # accepted for forward-compatibility only. Warn once if the
+    # operator passed it explicitly so the inconsistency surfaces.
+    if no_track_cost:
+        click.echo(
+            "info: --no-track-cost noted (cost tracking ships in "
+            "v0.5 row #11 sub-gate b; this flag is a no-op for now).",
+            err=True,
+        )
+
+    result = spawn_cursor_chat(
+        project_root, question=question_text, binary_override=binary_override
+    )
+
+    if not result.cursor_found:
+        raise click.UsageError(
+            "no Cursor binary found on PATH (looked for 'agent', "
+            "'cursor-agent', 'cursor'). Pass --binary <path>, or install "
+            "Cursor's CLI. If you don't have Cursor at all, the "
+            "v0.5 row #11 sub-gate b --backend builtin path will let "
+            "you chat through ai-cockpit's own LLM provider once it "
+            "ships."
+        )
+
+    if result.system_prompt_bytes:
+        click.echo(
+            f"info: injected {result.system_prompt_bytes} bytes of "
+            f".ai-cockpit/memory/*.md into Cursor's system prompt.",
+            err=True,
+        )
+    if result.truncated_files:
+        click.echo(
+            "warning: memory budget (64 KB) exceeded; truncated: "
+            + ", ".join(result.truncated_files),
+            err=True,
+        )
+    if result.dirty_paths_on_exit:
+        click.echo(
+            "warning: working tree gained the following uncommitted "
+            "paths during this chat session (Cursor's --read-only flag "
+            "may not have been honoured by your build):",
+            err=True,
+        )
+        for p in result.dirty_paths_on_exit:
+            click.echo(f"  {p}    (revert with: git checkout -- {p})", err=True)
+        click.echo(
+            "Either revert these paths or run `ai-cockpit run` to "
+            "ratify them through the workflow.",
+            err=True,
+        )
+
+    ctx = click.get_current_context()
+    ctx.exit(result.exit_code)
 
 
 # ---------------------------------------------------------------------------
