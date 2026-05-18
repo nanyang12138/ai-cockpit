@@ -48,6 +48,13 @@ from ai_cockpit.plans import (
     load_plan,
     plan_path,
 )
+from ai_cockpit.project_config import (
+    ProjectConfig,
+    ProjectConfigError,
+    emit_apply_warning_if_needed,
+    load_project_config,
+    resolve_workflow_value,
+)
 from ai_cockpit.tools.git import is_git_repo
 from ai_cockpit.tools.shell import run_command
 from ai_cockpit.workflow import (
@@ -248,6 +255,51 @@ def _apply_workflow_defaults(
     return mode, max_loops, test_commands
 
 
+# Maps Click parameter names (the `var name` second arg in @click.option) to
+# the corresponding ProjectConfig attribute name. v0.5 row #10 sub-gate a.
+_CLI_TO_CONFIG_NAME: dict[str, str] = {
+    "llm_mode": "llm",
+    "worker_name": "worker",
+    "apply": "apply",
+    "workflow_path": "workflow",
+    "max_loops": "max_loops",
+    "mode": "mode",
+    "reviewer_backend": "reviewer",
+    "backend": "backend",
+    "suggest": "suggest",
+    "allow_dirty_tree": "allow_dirty_tree",
+}
+
+
+def _apply_project_config_defaults(
+    ctx: click.Context,
+    cfg: ProjectConfig,
+    values: dict[str, object],
+) -> dict[str, object]:
+    """Back-fill DEFAULT-source CLI flags from ``ProjectConfig`` (v0.5 row #10).
+
+    For each parameter present in ``values``:
+      * If the operator passed it on the CLI → keep the CLI value.
+      * Otherwise, if the project config has a value for the
+        corresponding key → use that.
+      * Otherwise leave the Click-default value untouched.
+    """
+
+    default = click.core.ParameterSource.DEFAULT
+    result = dict(values)
+    for cli_name in values:
+        cfg_name = _CLI_TO_CONFIG_NAME.get(cli_name)
+        if cfg_name is None:
+            continue
+        if ctx.get_parameter_source(cli_name) != default:
+            continue
+        cfg_value = getattr(cfg, cfg_name, None)
+        if cfg_value is None:
+            continue
+        result[cli_name] = cfg_value
+    return result
+
+
 @main.command(
     name="run",
     help="Run the idea-to-MVP execution loop on an idea (default subcommand).",
@@ -382,21 +434,20 @@ def _apply_workflow_defaults(
     ),
 )
 @click.option(
-    "--apply",
+    "--apply/--no-apply",
     "apply",
-    is_flag=True,
     default=False,
     help=(
         "For --worker {aider,cursor}: opt in to actually invoking the worker "
         "so it can modify files. Without --apply the worker is never spawned "
         "(preview-only). Ignored for --worker stub. Mutually exclusive with "
-        "--dry-run."
+        "--dry-run. Pass --no-apply to override a project config that sets "
+        "apply=true (v0.5 row #10)."
     ),
 )
 @click.option(
-    "--allow-dirty-tree",
+    "--allow-dirty-tree/--no-allow-dirty-tree",
     "allow_dirty_tree",
-    is_flag=True,
     default=False,
     help=(
         "Skip the A.7 pre-run dirty-tree pre-check. By default, "
@@ -446,7 +497,48 @@ def run_cmd(
     if resume and not thread_id:
         raise click.UsageError("--resume requires --thread-id")
 
-    worker_name = (worker_name or "stub").lower()
+    user_input = " ".join(idea).strip() if idea else ""
+    if not resume and not user_input:
+        raise click.UsageError("idea must be a non-empty string")
+
+    project_root = str(Path(root).resolve())
+
+    # v0.5 row #10: load project-level CLI flag defaults BEFORE flag
+    # validation so a config-supplied ``worker:`` or ``apply:`` can drive
+    # the validations below. Credentials in config are fatal (Q5);
+    # everything else degrades to stderr error per §4.4.
+    try:
+        project_config = load_project_config(project_root)
+    except ProjectConfigError as exc:
+        raise click.UsageError(str(exc)) from exc
+    cli_values: dict[str, object] = {
+        "llm_mode": llm_mode,
+        "worker_name": worker_name,
+        "apply": apply,
+        "workflow_path": workflow_path,
+        "max_loops": max_loops,
+        "mode": mode,
+        "reviewer_backend": reviewer_backend,
+        "suggest": suggest,
+        "allow_dirty_tree": allow_dirty_tree,
+    }
+    cli_values = _apply_project_config_defaults(ctx, project_config, cli_values)
+    llm_mode = str(cli_values["llm_mode"])
+    worker_name = str(cli_values["worker_name"]).lower()
+    apply = bool(cli_values["apply"])
+    workflow_path = (
+        str(cli_values["workflow_path"])
+        if cli_values["workflow_path"] is not None
+        else None
+    )
+    max_loops = int(cli_values["max_loops"])  # type: ignore[call-overload]
+    mode = str(cli_values["mode"])
+    reviewer_backend = str(cli_values["reviewer_backend"])
+    suggest = bool(cli_values["suggest"])
+    allow_dirty_tree = bool(cli_values["allow_dirty_tree"])
+
+    # Validations run AFTER project-config back-fill so a config-supplied
+    # ``worker: aider`` correctly enables --apply on the CLI side.
     if apply and worker_name not in _APPLY_CAPABLE_WORKERS:
         raise click.UsageError(
             "--apply is only meaningful with --worker aider|cursor"
@@ -466,11 +558,19 @@ def run_cmd(
         worker_name in _APPLY_CAPABLE_WORKERS and not apply
     )
 
-    user_input = " ".join(idea).strip() if idea else ""
-    if not resume and not user_input:
-        raise click.UsageError("idea must be a non-empty string")
+    # Q8: a bare simple-name (no path separator, no .yaml/.yml suffix) is
+    # resolved relative to <project_root>/.ai-cockpit/workflows/ so config
+    # can read naturally as ``workflow: bug-fix``.
+    if workflow_path is not None:
+        workflow_path = resolve_workflow_value(workflow_path, project_root)
 
-    project_root = str(Path(root).resolve())
+    # Q6: warn whenever apply=true was supplied by the committed config
+    # (not by an explicit CLI flag) on this invocation.
+    emit_apply_warning_if_needed(
+        apply, source=project_config.source_of("apply")
+        if ctx.get_parameter_source("apply") == click.core.ParameterSource.DEFAULT
+        else "C"
+    )
 
     if (
         worker_name in _APPLY_CAPABLE_WORKERS
@@ -639,7 +739,9 @@ def run_cmd(
         "agnostic per contract Q1."
     ),
 )
+@click.pass_context
 def plan_cmd(
+    ctx: click.Context,
     idea: tuple[str, ...],
     root: str,
     output: str | None,
@@ -655,6 +757,21 @@ def plan_cmd(
     user_input = " ".join(idea).strip()
     if not user_input:
         raise click.UsageError("idea must be a non-empty string")
+    # v0.5 row #10: back-fill llm_mode/backend/worker_name from config.
+    try:
+        project_config = load_project_config(str(Path(root).resolve()))
+    except ProjectConfigError as exc:
+        raise click.UsageError(str(exc)) from exc
+    cli_values = _apply_project_config_defaults(
+        ctx,
+        project_config,
+        {"llm_mode": llm_mode, "backend": backend, "worker_name": worker_name},
+    )
+    llm_mode = str(cli_values["llm_mode"])
+    backend = str(cli_values["backend"])
+    worker_name = (
+        str(cli_values["worker_name"]) if cli_values["worker_name"] is not None else None
+    )
     if llm_mode != "none" and not click.get_text_stream("stdin").isatty():
         raise click.UsageError(
             "Interactive planner requires a TTY. Use --llm none only for tests."
@@ -734,6 +851,33 @@ def status_cmd(root: str) -> None:
     click.echo(f"workflows_found: {workflows_found}")
     click.echo(f"suggestions_pending: {suggestions_pending}")
     click.echo(f"checkpoint_db: {checkpoint_db}")
+
+    # v0.5 row #10 sub-gate a: surface project config presence + resolved
+    # defaults with source markers (P=project config, L=local override,
+    # D=built-in default).
+    try:
+        cfg = load_project_config(project_root)
+    except ProjectConfigError as exc:
+        click.echo(f"project_config: INVALID — {exc}")
+        return
+    click.echo(f"project_config: {cfg.project_path or '(none)'}")
+    click.echo(f"local_overrides: {cfg.local_path or '(none)'}")
+    if not cfg.is_empty:
+        click.echo("resolved_defaults:")
+        for key in (
+            "llm", "worker", "apply", "workflow", "max_loops",
+            "mode", "reviewer", "backend", "suggest", "allow_dirty_tree",
+        ):
+            value = getattr(cfg, key)
+            if value is None:
+                continue
+            src = cfg.source_of(key) or "D"
+            extra = (
+                "  # warning: --apply on by default"
+                if key == "apply" and value is True
+                else ""
+            )
+            click.echo(f"  {key}: {value!r} ({src}){extra}")
 
 
 # ---------------------------------------------------------------------------
