@@ -126,14 +126,27 @@ def main() -> None:  # noqa: D401 - click group docstring is in the decorator
 
 
 # A.7: paths matching any of these prefixes are aider/ai-cockpit runtime
-# side-effects, not user work, so a dirty entry pointing at one of them
+# side-effects (NOT user work), so a dirty entry pointing at one of them
 # never blocks `--worker aider --apply`. Keep in sync with `docs/ROADMAP.md`
 # §A.7 and the A.8 .gitignore additions.
+#
+# v0.5 row #10 follow-up (2026-05-18, surfaced by real-user use):
+# ``ai-cockpit init`` writes ``.ai-cockpit/config.yaml`` and may append
+# one line to ``.gitignore``. Without these in the allow-list every
+# fresh-checkout operator who ran ``init`` hits the dirty-tree guard on
+# their very next run. Aider runs with ``--no-gitignore`` so it cannot
+# squash a real gitignore WIP; the cursor worker also does not edit
+# top-level config files during normal task execution. The risk of
+# allow-listing these is bounded; the friction of NOT allow-listing
+# them is "tool unusable after init".
 _AIDER_RUNTIME_ALLOWLIST_PREFIXES: tuple[str, ...] = (
     ".aider.",
     ".aider/",
     ".ai-cockpit/suggestions/",
     ".ai-cockpit/history/",
+    ".ai-cockpit/config.yaml",
+    ".ai-cockpit/config.local.yaml",
+    ".gitignore",
 )
 
 # Workers that may modify files; share the dirty-tree guard + --apply gate.
@@ -984,6 +997,12 @@ def init_cmd(root: str, force: bool) -> None:
         "variables — LLM_API_KEY, LLM_API_BASE, LLM_MODEL_NAME (or "
         "ANTHROPIC_API_KEY / OPENAI_API_KEY). Credentials are NEVER "
         "accepted inside config.yaml (the loader refuses to start)."
+    )
+    click.echo(
+        "Suggested follow-up: commit the new files so they're tracked "
+        "with the project:\n"
+        "    git add .ai-cockpit/config.yaml .gitignore\n"
+        "    git commit -m 'ai-cockpit: initial project config'"
     )
     click.echo(
         "Next step: `ai-cockpit status` to verify the config is loading "
