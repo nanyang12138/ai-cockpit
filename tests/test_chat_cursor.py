@@ -80,26 +80,23 @@ def test_compose_truncates_alphabetically_when_over_budget(tmp_path: Path) -> No
 
 
 # ---------------------------------------------------------------------------
-# build_cursor_args
+# build_cursor_args (post 2026-05-18 07:59 UTC fix: build-agnostic; no
+# --read-only / --system-prompt flags. See chat.py module docstring.)
 # ---------------------------------------------------------------------------
 
 
-def test_build_args_includes_readonly_first() -> None:
-    args = build_cursor_args("/usr/bin/cursor", "the prompt", None)
-    assert args[0] == "/usr/bin/cursor"
-    assert args[1] == "--read-only"
-    assert "--system-prompt" in args
-    sp_idx = args.index("--system-prompt")
-    assert args[sp_idx + 1] == "the prompt"
+def test_build_args_interactive_has_no_flags() -> None:
+    """Interactive mode: argv is just ``[binary]`` — no flags at all,
+    so any cursor build accepts it."""
+    args = build_cursor_args("/usr/bin/cursor", None)
+    assert args == ["/usr/bin/cursor"]
 
 
-def test_build_args_appends_question_when_present() -> None:
-    args = build_cursor_args("/bin/cursor", "sys", "what does cli.py do?")
-    assert args[-1] == "what does cli.py do?"
-
-
-def test_build_args_omits_system_prompt_when_empty() -> None:
-    args = build_cursor_args("/bin/cursor", "", None)
+def test_build_args_one_shot_appends_question() -> None:
+    args = build_cursor_args("/bin/cursor", "what does cli.py do?")
+    assert args == ["/bin/cursor", "what does cli.py do?"]
+    # No --read-only or --system-prompt anywhere.
+    assert "--read-only" not in args
     assert "--system-prompt" not in args
 
 
@@ -128,7 +125,10 @@ def test_spawn_returns_127_when_no_binary_discovered(
     assert not result.cursor_found
 
 
-def test_spawn_passes_memory_prompt_to_cursor(tmp_path: Path) -> None:
+def test_spawn_interactive_writes_memory_to_temp_file(tmp_path: Path) -> None:
+    """Interactive (no question): memory is written to
+    .ai-cockpit/history/chat-context-<thread>.md; cursor is spawned
+    with no flags."""
     mem = tmp_path / ".ai-cockpit" / "memory"
     mem.mkdir(parents=True)
     (mem / "project.md").write_text("Use pytest -q.\n")
@@ -139,24 +139,48 @@ def test_spawn_passes_memory_prompt_to_cursor(tmp_path: Path) -> None:
         runner=_fake_runner_factory(captured),
     )
     assert len(captured) == 1
-    args = captured[0]
-    assert "--read-only" in args
-    assert "--system-prompt" in args
-    sp_idx = args.index("--system-prompt")
-    assert "Use pytest -q." in args[sp_idx + 1]
+    assert captured[0] == ("/tmp/fake-cursor",)  # NO flags, NO args
+    assert result.memory_context_file is not None
+    assert Path(result.memory_context_file).is_file()
+    assert "Use pytest -q." in Path(result.memory_context_file).read_text()
     assert result.system_prompt_bytes > 0
-    assert result.truncated_files == ()
 
 
-def test_spawn_appends_question(tmp_path: Path) -> None:
+def test_spawn_one_shot_prepends_memory_to_question(tmp_path: Path) -> None:
+    """One-shot (question given): memory is prepended to the question;
+    cursor receives one combined positional argument."""
+    mem = tmp_path / ".ai-cockpit" / "memory"
+    mem.mkdir(parents=True)
+    (mem / "project.md").write_text("Use pytest -q.\n")
     captured: list[Sequence[str]] = []
-    spawn_cursor_chat(
+    result = spawn_cursor_chat(
         tmp_path,
         question="what does foo do?",
         binary_override="/tmp/fake-cursor",
         runner=_fake_runner_factory(captured),
     )
-    assert captured[0][-1] == "what does foo do?"
+    args = captured[0]
+    assert args[0] == "/tmp/fake-cursor"
+    assert len(args) == 2  # binary + combined question, no flags
+    combined = args[1]
+    assert "Use pytest -q." in combined
+    assert "what does foo do?" in combined
+    # memory should appear BEFORE the question in the combined text
+    assert combined.index("Use pytest -q.") < combined.index("what does foo do?")
+    # No temp file in one-shot mode (memory went directly to cursor argv).
+    assert result.memory_context_file is None
+
+
+def test_spawn_one_shot_without_memory_passes_question_verbatim(tmp_path: Path) -> None:
+    """No .ai-cockpit/memory/* → question is passed unchanged."""
+    captured: list[Sequence[str]] = []
+    spawn_cursor_chat(
+        tmp_path,
+        question="bare question?",
+        binary_override="/tmp/fake-cursor",
+        runner=_fake_runner_factory(captured),
+    )
+    assert captured[0] == ("/tmp/fake-cursor", "bare question?")
 
 
 def test_spawn_detects_dirty_after_chat(tmp_path: Path) -> None:
