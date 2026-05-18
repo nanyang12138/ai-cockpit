@@ -1,8 +1,10 @@
-# V0.5 Row #11 — `chat-mode` contract (v0.1, DRAFT — Q-table pending user lock)
+# V0.5 Row #11 — `chat-mode` contract (v0.1, LOCKED)
 
-Status: **draft, NOT locked.** §3 Q1–Q8 record cron's recommendations;
-user must lock (per row or "accept all cron recommendations") before
-this document becomes the implementation gate.
+Status: **contract locked.** User authorised the §3 Q-answers on
+2026-05-18 07:30 UTC ("accept all cron recommendations verbatim,
+open-gate v0.5-row-11-impl-a"). The same message also opens the
+implementation-a gate; impl-b remains gated on impl-a's merge per
+§12.
 
 > Pure-documentation deliverable: 2 files / ≤350 net LOC. No code
 > under `src/`, no tests touched.
@@ -61,18 +63,21 @@ cursor's context; (d) cost auditability via the existing
 | Backwards compatibility | EXECUTION_RULES | Existing 343-test baseline stays green. No CLI-flag signature change to `run` / `plan` / `plans run` / `status` / etc. |
 | ≤8 files / ≤400 net LOC per PR | EXECUTION_RULES | Contract (this PR): 2 files / ≤350. Impl: split into a (CLI surface + cursor spawn) ≤4 files / ≤250 LOC, plus optional b (memory injection + cost logging) ≤4 / ≤200. Sub-gate split locked in §6. |
 
-## 3. Open questions (cron recommendations — awaiting user lock)
+## 3. Resolved decisions (user-locked 2026-05-18 07:30 UTC)
 
-| # | Question | Cron recommendation | User answer |
-|---|---|---|---|
-| Q1 | Chat read-only or writable? **(most important)** | **Read-only.** Chat exists for "low-commitment exploration". Cursor is spawned with `--read-only` if its CLI supports it; if not, ai-cockpit takes a `git stash` snapshot before chat starts and refuses to exit cleanly if the working tree changed without operator confirmation. Writable chat blurs the workflow/chat boundary and re-introduces the surprise-edit risk the row #10 dirty-tree precheck protects against. | |
-| Q2 | Backend support in v0.1 | **`cursor` + `builtin`.** Sub-gate a ships `--backend cursor` (the headline shape). Sub-gate b is OPTIONAL and ships `--backend builtin` (direct LLM_API_KEY chat via the existing LLMProvider). Aider's interactive mode is NOT supported in v0.1 — aider's REPL is commit-flow-oriented, not chat-oriented, and supporting it would dilute the row's clarity. | |
-| Q3 | One-shot vs interactive | **Both.** `ai-cockpit chat` (no args) opens interactive cursor; `ai-cockpit chat "<question>"` is one-shot Q&A (cursor answers + exits, no REPL). The same subcommand handles both shapes by checking whether positional args are present. | |
-| Q4 | Memory injection mechanism | **System-prompt prepend.** All `.ai-cockpit/memory/*.md` files (concatenated, with a header line per file) are passed to cursor as a system prompt prefix via cursor's `--system-prompt` flag (or whatever cursor's equivalent is). Cap at 64 KB to protect against runaway memory growth; if memory total exceeds the cap, emit a stderr warning naming which files were truncated. | |
-| Q5 | Process model | **`subprocess.run` with inherited stdin/stdout/stderr.** ai-cockpit stays the parent process. NO `os.execvp` replacement. Cursor's exit code propagates as ai-cockpit's exit code. | |
-| Q6 | Cost tracking | **Yes, opt-out-able.** ai-cockpit writes one row to the cost-dashboard DB per chat session with `worker_name="chat"` so `ai-cockpit cost` reflects chat token spend alongside workflow token spend. Pass `--no-track-cost` to skip; default is to track. | |
-| Q7 | Chat-session log retention | **`.ai-cockpit/history/chat.<thread-id>.log`.** ai-cockpit creates a thread id (same `new_thread_id()` it uses for workflow runs), and the cursor session's stderr is teed to this log for post-hoc operator review. Logs are gitignored under the existing `.ai-cockpit/history/` allow-list. NOT written to `memory/*`. | |
-| Q8 | Chat → workflow handoff | **Out of scope for v0.5.** "I chatted, now I want to run the task we discussed" requires the operator to exit chat and invoke `ai-cockpit run` (or `ai-cockpit plan`) themselves. v0.1 explicitly does not implement an in-REPL "/run" command. Revisit in v0.6 if real-use demand surfaces. | |
+User answer is **"accept all cron recommendations verbatim"** —
+applied uniformly to Q1–Q8.
+
+| # | Question | Locked decision |
+|---|---|---|
+| Q1 | Chat read-only or writable? **(most important)** | **Read-only.** Cursor is spawned with `--read-only` if its CLI supports it; if not, ai-cockpit takes a `git stash` snapshot before chat starts and reports modified paths on exit. Writable chat blurs the workflow/chat boundary and re-introduces the surprise-edit risk the row #10 dirty-tree precheck protects against. |
+| Q2 | Backend support in v0.1 | **`cursor` + `builtin`.** Sub-gate a ships `--backend cursor`. Sub-gate b is OPTIONAL and ships `--backend builtin` (direct LLM_API_KEY via the existing LLMProvider). Aider's interactive mode is NOT supported in v0.1 (REPL is commit-flow-shaped, not chat-shaped). |
+| Q3 | One-shot vs interactive | **Both.** `ai-cockpit chat` (no positional arg) opens interactive cursor; `ai-cockpit chat "<question>"` is one-shot Q&A. Same subcommand. |
+| Q4 | Memory injection mechanism | **System-prompt prepend.** All `.ai-cockpit/memory/*.md` files (concatenated, per-file header) passed via cursor's `--system-prompt` flag or equivalent. 64 KB cap; over-cap files truncated alphabetically with stderr warning naming them. |
+| Q5 | Process model | **`subprocess.run` with inherited stdin/stdout/stderr.** ai-cockpit stays parent. NO `execvp` replacement. Cursor's exit code propagates. |
+| Q6 | Cost tracking | **Yes, opt-out-able.** One cost-dashboard row per chat session with `worker_name="chat"`. `--no-track-cost` to skip. |
+| Q7 | Chat-session log retention | **`.ai-cockpit/history/chat.<thread-id>.log`.** Same `new_thread_id()` factory as workflow runs. Gitignored under existing allow-list. NOT written to `memory/*`. |
+| Q8 | Chat → workflow handoff | **Out of scope for v0.5.** Operator exits chat then runs `ai-cockpit run` / `plan`. No in-REPL `/run` command. Revisit in v0.6 if real-use demand surfaces. |
 
 ## 4. Architecture
 
@@ -255,20 +260,22 @@ a still works with `--backend cursor` only.
 
 | When | Signal | Authorised action | Status |
 |---|---|---|---|
-| 2026-05-18 07:08 UTC | "可以" (in response to the open-roadmap + draft-contract proposal) | This PR: ROADMAP entry + this contract draft, doc-only | THIS PR |
-| TBD | `open-gate v0.5-row-11-lock` (or "accept all cron recommendations verbatim") | Doc-only PR that flips status DRAFT→LOCKED and fills §3 User-answer column | not granted |
-| TBD | `open-gate v0.5-row-11-impl-a` | Sub-gate a implementation PR | not granted |
-| TBD | `open-gate v0.5-row-11-impl-b` | Sub-gate b implementation PR | not granted, depends on a merged |
+| 2026-05-18 07:08 UTC | "可以" | Contract DRAFT (PR #108) — doc-only, no Q-lock | done — merged to master |
+| 2026-05-18 07:30 UTC | "accept all cron recommendations verbatim, open-gate v0.5-row-11-impl-a" | (a) Lock PR — doc-only, flips status DRAFT→LOCKED, fills §3 User-answer column. (b) impl-a PR — `src/` changes ≤4 files / ≤250 LOC per §6. | (a) THIS PR. (b) follow-up PR after this one merges. |
+| TBD | `open-gate v0.5-row-11-impl-b` | impl-b PR — builtin backend + cost integration, ≤4 files / ≤200 LOC per §6 | NOT granted; depends on impl-a merged |
 
 ## 12. Open-gate protocol
 
 ```text
 open-gate v0.5-row-11-contract              # granted 2026-05-18 07:08 UTC;
+                                            # delivered via PR #108 (merged).
+open-gate v0.5-row-11-lock                  # granted 2026-05-18 07:30 UTC
+                                            # ("accept all cron
+                                            # recommendations verbatim");
                                             # THIS PR is the deliverable.
-open-gate v0.5-row-11-lock                  # NOT granted — needs §3 Q1–Q8
-                                            # answers (or "accept all cron
-                                            # recommendations verbatim").
-open-gate v0.5-row-11-impl-a                # NOT until row-11-lock merged.
+open-gate v0.5-row-11-impl-a                # granted 2026-05-18 07:30 UTC;
+                                            # impl PR follows after this
+                                            # lock PR merges.
 open-gate v0.5-row-11-impl-b                # NOT until impl-a merged.
 
 open-gate v0.5-row-11-writable-chat         # NEVER without §3 Q1 reversal
@@ -277,10 +284,8 @@ open-gate v0.5-row-11-aider-backend         # NEVER in v0.5; future row.
 open-gate v0.5-row-11-in-chat-run-command   # NEVER in v0.5 (Q8 out-of-scope).
 ```
 
-A future `open-gate v0.5-row-11-lock` signal must reference §3's
-Q1–Q8 (with per-row answers or "accept all cron recommendations
-verbatim"). Otherwise cron stops with an OQ per
-`AUTOMATION_PROMPT.md` §4.
+A future `open-gate v0.5-row-11-impl-b` signal must reference
+this row by name. Once impl-b ships, the row is complete.
 
 ## 13. Cross-links
 
