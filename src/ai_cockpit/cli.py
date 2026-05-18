@@ -54,6 +54,7 @@ from ai_cockpit.project_config import (
     emit_apply_warning_if_needed,
     load_project_config,
     resolve_workflow_value,
+    write_project_config,
 )
 from ai_cockpit.tools.git import is_git_repo
 from ai_cockpit.tools.shell import run_command
@@ -878,6 +879,116 @@ def status_cmd(root: str) -> None:
                 else ""
             )
             click.echo(f"  {key}: {value!r} ({src}){extra}")
+
+
+# ---------------------------------------------------------------------------
+# init subcommand (v0.5 row #10 sub-gate b)
+# ---------------------------------------------------------------------------
+
+
+@main.command(
+    name="init",
+    help=(
+        "Interactively create .ai-cockpit/config.yaml (v0.5 row #10). "
+        "Asks 6 questions and writes the answers as your per-project CLI "
+        "flag defaults so daily `ai-cockpit run \"...\"` invocations no "
+        "longer need a long flag stack. Re-run with --force to regenerate."
+    ),
+)
+@click.option(
+    "--root",
+    "root",
+    default=".",
+    show_default=True,
+    type=click.Path(exists=True, file_okay=False, dir_okay=True, resolve_path=True),
+    help="Project root where .ai-cockpit/config.yaml will be written.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help=(
+        "Overwrite an existing config.yaml. The previous file is renamed "
+        "to config.yaml.bak.<UTC-timestamp> before the new one is written."
+    ),
+)
+def init_cmd(root: str, force: bool) -> None:
+    """Generate ``<root>/.ai-cockpit/config.yaml`` interactively."""
+
+    project_root = Path(root).resolve()
+    cfg_path = project_root / ".ai-cockpit" / "config.yaml"
+
+    if cfg_path.exists() and not force:
+        raise click.UsageError(
+            f"{cfg_path} already exists. Pass --force to overwrite (the "
+            "existing file will be backed up to "
+            "config.yaml.bak.<timestamp> first), or edit it by hand."
+        )
+
+    click.echo(
+        "ai-cockpit project init.\n"
+        "I'll ask 6 short questions; press Enter to accept each default. "
+        "Ctrl-C cancels at any time.\n"
+    )
+
+    llm = click.prompt(
+        "LLM provider",
+        default="auto",
+        type=click.Choice(["none", "auto", "anthropic", "openai"], case_sensitive=False),
+        show_choices=True,
+    )
+    worker = click.prompt(
+        "Worker (who executes code changes)",
+        default="aider",
+        type=click.Choice(["stub", "aider", "cursor"], case_sensitive=False),
+        show_choices=True,
+    )
+    apply = click.confirm(
+        "Apply changes to the working tree by default? (No = preview-only)",
+        default=False,
+    )
+    workflow = click.prompt(
+        "Default workflow (bare name resolves under .ai-cockpit/workflows/)",
+        default="bug-fix",
+    )
+    max_loops = click.prompt(
+        "Maximum retry loops per run",
+        default=1,
+        type=click.IntRange(min=0, max=10),
+    )
+    suggest = click.confirm(
+        "Generate memory-update suggestions after each run?",
+        default=True,
+    )
+
+    if cfg_path.exists():
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+        backup = cfg_path.with_name(f"config.yaml.bak.{ts}")
+        cfg_path.rename(backup)
+        click.echo(f"backed up existing config to {backup}")
+
+    written = write_project_config(
+        project_root,
+        ProjectConfig(
+            llm=llm.lower(),
+            worker=worker.lower(),
+            apply=apply,
+            workflow=workflow,
+            max_loops=max_loops,
+            suggest=suggest,
+        ),
+    )
+    click.echo(f"\nwrote {written}")
+    click.echo(
+        "\nReminder: LLM credentials must be exported as environment "
+        "variables — LLM_API_KEY, LLM_API_BASE, LLM_MODEL_NAME (or "
+        "ANTHROPIC_API_KEY / OPENAI_API_KEY). Credentials are NEVER "
+        "accepted inside config.yaml (the loader refuses to start)."
+    )
+    click.echo(
+        "Next step: `ai-cockpit status` to verify the config is loading "
+        "correctly."
+    )
 
 
 # ---------------------------------------------------------------------------
