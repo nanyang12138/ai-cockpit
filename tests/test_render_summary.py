@@ -1,19 +1,23 @@
-"""v0.5 summary-rendering tests (tier 1+2: colored / structured text).
+"""v0.5 summary-rendering tests.
 
-Cover: plain (v0.1-compatible) shape, text shape with section dividers
-and status tokens, ``is_color_enabled`` gating against TTY / NO_COLOR,
-and the ``print_summary`` dispatcher's text vs plain branches. Also
-pin the hard invariant that ``final_summary`` retains the literal
-``"AI Cockpit — Run Summary"`` substring in both rendering paths —
-existing 343-baseline checkpoint replay + grep workflows depend on it.
+Tier 1+2 (sub-gate a, PR #113): plain (v0.1-compatible) shape, text
+shape with section dividers and status tokens, ``is_color_enabled``
+gating against TTY / NO_COLOR, and the ``print_summary`` dispatcher's
+text vs plain branches.
 
-Future tier 3 (``json``, ``quiet``, "Next Steps" hints) ships in the
-follow-up PR.
+Tier 3 (sub-gate b, this file's later sections): JSON / quiet output
+formats and the "Next Steps" actionable-hint section in text mode.
+
+The hard invariant pinned across both tiers: ``final_summary`` retains
+the literal ``"AI Cockpit — Run Summary"`` substring in every
+rendering path — existing checkpoint replay + grep workflows depend
+on it.
 """
 
 from __future__ import annotations
 
 import io
+import json
 import os
 from typing import Any
 from unittest.mock import patch
@@ -24,7 +28,9 @@ from ai_cockpit.nodes.summary import summary_node
 from ai_cockpit.render import (
     is_color_enabled,
     print_summary,
+    render_summary_json,
     render_summary_plain,
+    render_summary_quiet,
     render_summary_text,
 )
 from ai_cockpit.state import TaskState
@@ -253,3 +259,153 @@ def test_summary_node_writes_final_summary_in_text_mode() -> None:
         update = summary_node(state)
     assert "final_summary" in update
     assert "AI Cockpit — Run Summary" in update["final_summary"]
+
+
+# ---------------------------------------------------------------------------
+# Tier 3 — JSON renderer
+# ---------------------------------------------------------------------------
+
+
+def test_json_renderer_is_valid_json_and_contains_decision() -> None:
+    payload = json.loads(render_summary_json(_sample_state()))
+    assert payload["decision"] == "done"
+    assert payload["mode"] == "exploration"
+    assert payload["verification"]["passed"] is True
+    assert payload["review"]["passed"] is True
+    assert payload["acceptance_criteria"] == ["criterion 1", "criterion 2"]
+
+
+def test_json_renderer_includes_metrics_when_present() -> None:
+    state = _sample_state()
+    state["metrics"] = {"tokens_sent": 1234.0, "cost_session_usd": 0.07}
+    payload = json.loads(render_summary_json(state))
+    assert payload["metrics"]["tokens_sent"] == 1234.0
+    assert payload["metrics"]["cost_session_usd"] == 0.07
+
+
+def test_json_renderer_no_ansi_escapes_anywhere() -> None:
+    out = render_summary_json(_sample_state())
+    assert "\x1b[" not in out
+
+
+def test_json_renderer_renders_verification_commands_with_exit_codes() -> None:
+    state = _sample_state()
+    state["verification_result"] = {
+        "passed": False,
+        "commands": [
+            {"command": "pytest -q", "exit_code": 1, "stdout": "", "stderr": ""},
+            {"command": "ruff check .", "exit_code": 0, "stdout": "", "stderr": ""},
+        ],
+        "git_diff": "", "git_status": "",
+    }
+    payload = json.loads(render_summary_json(state))
+    assert payload["verification"]["passed"] is False
+    cmds = payload["verification"]["commands"]
+    assert len(cmds) == 2
+    assert cmds[0] == {"command": "pytest -q", "exit_code": 1}
+    assert cmds[1] == {"command": "ruff check .", "exit_code": 0}
+
+
+# ---------------------------------------------------------------------------
+# Tier 3 — Quiet renderer
+# ---------------------------------------------------------------------------
+
+
+def test_quiet_renderer_is_single_line_with_decision_token() -> None:
+    out = render_summary_quiet(_sample_state(), color=False).rstrip("\n")
+    assert "\n" not in out
+    assert "[DONE]" in out
+    assert "verification=pass" in out
+    assert "review=pass" in out
+    assert "risk=low" in out
+
+
+def test_quiet_renderer_fail_state_renders_compactly() -> None:
+    state = _sample_state(decision="ask_human")
+    state["verification_result"] = {
+        "passed": False, "commands": [], "git_diff": "", "git_status": "",
+    }
+    state["review_result"] = {
+        "passed": False, "issues": [], "risk_level": "high",
+        "suggested_fix": "", "notes": "",
+    }
+    out = render_summary_quiet(state, color=False)
+    assert "[ASK_HUMAN]" in out
+    assert "verification=fail" in out
+    assert "review=fail" in out
+    assert "risk=high" in out
+
+
+# ---------------------------------------------------------------------------
+# Tier 3 — "Next Steps" actionable hints in text renderer
+# ---------------------------------------------------------------------------
+
+
+def test_next_steps_section_appears_on_ask_human() -> None:
+    state = _sample_state(decision="ask_human")
+    state["verification_result"] = {
+        "passed": False,
+        "commands": [
+            {"command": "pytest -q", "exit_code": 1, "stdout": "", "stderr": ""},
+        ],
+        "git_diff": "", "git_status": "",
+    }
+    state["review_result"] = {
+        "passed": False, "issues": ["something is off"],
+        "risk_level": "high", "suggested_fix": "", "notes": "",
+    }
+    out = render_summary_text(state, color=False)
+    assert "Next Steps" in out
+    assert "ai-cockpit memory list" in out
+    assert "ai-cockpit run" in out
+    # Diagnostic hint about the failing command appears as a comment.
+    assert "verification failed on" in out
+
+
+def test_next_steps_section_appears_on_done_with_memory_hint() -> None:
+    out = render_summary_text(_sample_state(), color=False)
+    assert "Next Steps" in out
+    assert "ai-cockpit memory list" in out
+    assert "git status --short" in out
+
+
+def test_next_steps_section_appears_on_retry_with_max_loops_hint() -> None:
+    out = render_summary_text(_sample_state(decision="retry"), color=False)
+    assert "Next Steps" in out
+    assert "--max-loops" in out
+
+
+# ---------------------------------------------------------------------------
+# Tier 3 — print_summary dispatcher for json + quiet
+# ---------------------------------------------------------------------------
+
+
+def test_print_summary_json_format_emits_parseable_json() -> None:
+    state = _sample_state()
+    state["output_format"] = "json"
+    out = _capture_stdout(print_summary, state)
+    payload = json.loads(out)
+    assert payload["decision"] == "done"
+    assert payload["verification"]["passed"] is True
+
+
+def test_print_summary_quiet_format_is_one_line() -> None:
+    state = _sample_state()
+    state["output_format"] = "quiet"
+    out = _capture_stdout(print_summary, state).rstrip("\n")
+    assert "\n" not in out
+    assert "[DONE]" in out
+    assert "verification=pass" in out
+
+
+def test_print_summary_final_summary_invariant_holds_for_all_formats() -> None:
+    """Tier 3 expands the format set; the v0.1 substring invariant still
+    must hold on the returned ``final_summary`` text for every format."""
+    for fmt in ("text", "plain", "json", "quiet"):
+        state = _sample_state()
+        state["output_format"] = fmt
+        with patch.object(click, "echo", lambda *_a, **_kw: None):
+            returned = print_summary(state)
+        assert "AI Cockpit — Run Summary" in returned, (
+            f"final_summary lost the v0.1 header in format={fmt!r}"
+        )

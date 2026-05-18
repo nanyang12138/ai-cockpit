@@ -1,22 +1,28 @@
-"""Summary rendering for the CLI run loop (v0.5 tier 1+2).
+"""Summary rendering for the CLI run loop (v0.5 tier 1+2+3).
 
-Two output modes:
+Four output modes:
 
 - ``text`` (default): structured layout with optional ANSI coloring
   on a TTY (honors ``NO_COLOR``). Decision is a bracket token
-  (``[DONE]`` / ``[ASK_HUMAN]`` / …) for grep.
+  (``[DONE]`` / ``[ASK_HUMAN]`` / …) for grep. Includes a "Next Steps"
+  section with actionable shell-command hints when the decision is
+  ``ask_human`` / ``retry`` / ``done``.
 - ``plain``: the v0.1 column-aligned shape, byte-identical to the
   pre-v0.5 ``render_summary`` output. ``final_summary`` always stores
   this shape so checkpoint replay + grep workflows keep working.
+- ``json``: machine-readable dump of the key fields. Useful for piping
+  to ``jq`` or feeding another tool.
+- ``quiet``: one-line ``[DECISION] verification=… review=… risk=…``,
+  convenient for shell loops and CI exit-code checks.
 
 Spec §12 boundary: CLI text formatting, not a UI / daemon.
 ``print_summary`` writes to stdout once and returns. Pure stdlib +
-``click.style`` (no ``rich`` / ``colorama``). Tier 3 (``json``,
-``quiet``, "Next Steps") ships in a follow-up PR.
+``click.style`` (no ``rich`` / ``colorama``).
 """
 
 from __future__ import annotations
 
+import json as _json
 import os
 import shutil
 import sys
@@ -29,7 +35,7 @@ from ai_cockpit.state import TaskState
 
 __all__ = [
     "print_summary", "render_summary_plain", "render_summary_text",
-    "is_color_enabled",
+    "render_summary_json", "render_summary_quiet", "is_color_enabled",
 ]
 
 
@@ -109,6 +115,48 @@ def _cmd_status_token(exit_code: int, *, color: bool) -> str:
 def _section_divider(title: str, *, width: int, color: bool) -> list[str]:
     bar = _style("-" * width, color=color, fg="bright_black")
     return ["", bar, _style(f"  {title}", color=color, bold=True), bar]
+
+
+def _next_steps(state: TaskState) -> list[tuple[str, str]]:
+    """Return ``(kind, body)`` pairs to render in the Next Steps section.
+
+    ``kind`` is ``"hint"`` (comment-style, rendered dim) or ``"cmd"`` (a
+    runnable shell line, rendered with an arrow). Heuristics-only —
+    suggestions are static templates derived from the existing evidence
+    on ``state``; no LLM call. Deliberately conservative — wrong
+    suggestions hurt more than missing ones.
+    """
+    review: dict[str, Any] = dict(state.get("review_result") or {})
+    verification: dict[str, Any] = dict(state.get("verification_result") or {})
+    decision = state.get("decision") or "ask_human"
+    cmds: list[dict[str, Any]] = list(verification.get("commands") or [])
+    issues: list[Any] = list(review.get("issues") or [])
+    failed = [c for c in cmds if int(c.get("exit_code", 0)) != 0]
+
+    steps: list[tuple[str, str]] = []
+    if decision == "ask_human":
+        if not verification.get("passed", False) and failed:
+            steps.append(("hint", f"verification failed on: {failed[0]['command']}"))
+        if not review.get("passed", False) and issues:
+            steps.append(("hint",
+                          f"reviewer flagged {len(issues)} issue(s); see above"))
+        steps.append(("cmd",
+                      'ai-cockpit memory list           '
+                      '# review the suggestion this run wrote'))
+        steps.append(("cmd",
+                      'ai-cockpit run "<refined idea>"  '
+                      '# try again with feedback in the idea string'))
+    elif decision == "retry":
+        steps.append(("hint", "decision=retry means the loop budget was not exhausted;"))
+        steps.append(("hint", "re-run with --max-loops N to allow more iterations."))
+    elif decision == "done":
+        steps.append(("cmd",
+                      'ai-cockpit memory list           '
+                      '# review and accept the suggestion this run wrote'))
+        steps.append(("cmd",
+                      'git status --short               '
+                      '# confirm only intended changes landed'))
+    return steps
 
 
 # ---------------------------------------------------------------------------
@@ -301,10 +349,72 @@ def render_summary_text(state: TaskState, *, color: bool | None = None,
         lines.append(_style("  Suggested fix:", color=color, bold=True))
         lines.extend(_wrap(suggested_fix, indent="    ", width=w))
 
+    steps = _next_steps(state)
+    if steps:
+        lines.extend(_section_divider("Next Steps", width=w, color=color))
+        arrow = _style("→", color=color, fg="cyan", bold=True)
+        for kind, body in steps:
+            if kind == "hint":
+                lines.append(f"    {_style('# ' + body, color=color, fg='bright_black')}")
+            else:
+                lines.append(f"    {arrow} {body}")
+
     lines.append("")
     lines.append(heavy)
     lines.append("")
     return "\n".join(lines)
+
+
+def render_summary_json(state: TaskState) -> str:
+    """Return a stable JSON dump of the run's key fields."""
+    review: dict[str, Any] = dict(state.get("review_result") or {})
+    verification: dict[str, Any] = dict(state.get("verification_result") or {})
+    cmds_raw: list[dict[str, Any]] = list(verification.get("commands") or [])
+    payload: dict[str, Any] = {
+        "decision": state.get("decision"),
+        "mode": state.get("mode"),
+        "loop_count": state.get("loop_count", 0),
+        "max_loops": state.get("max_loops", 1),
+        "idea": state.get("idea") or state.get("user_input") or "",
+        "mvp_spec": state.get("mvp_spec") or "",
+        "acceptance_criteria": list(state.get("acceptance_criteria") or []),
+        "implementation_slice": state.get("implementation_slice") or "",
+        "coder_result": state.get("coder_result") or "",
+        "verification": {
+            "passed": bool(verification.get("passed", False)),
+            "commands": [
+                {"command": c.get("command", ""),
+                 "exit_code": int(c.get("exit_code", 0))}
+                for c in cmds_raw
+            ],
+            "git_status": verification.get("git_status") or "",
+        },
+        "review": {
+            "passed": bool(review.get("passed", False)),
+            "risk_level": review.get("risk_level", "unknown"),
+            "issues": list(review.get("issues") or []),
+            "notes": review.get("notes") or "",
+            "suggested_fix": review.get("suggested_fix") or "",
+        },
+        "metrics": dict(state.get("metrics") or {}),
+    }
+    return _json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def render_summary_quiet(state: TaskState, *, color: bool | None = None) -> str:
+    """Return a one-line ``[DECISION] verification=… review=… risk=…`` summary."""
+    if color is None:
+        color = is_color_enabled()
+    review = dict(state.get("review_result") or {})
+    verification = dict(state.get("verification_result") or {})
+    decision = state.get("decision") or "ask_human"
+    v = "pass" if verification.get("passed") else "fail"
+    r = "pass" if review.get("passed") else "fail"
+    risk = review.get("risk_level", "unknown")
+    return (
+        f"{_decision_token(decision, color=color)} "
+        f"verification={v} review={r} risk={risk}"
+    )
 
 
 def print_summary(state: TaskState) -> str:
@@ -315,5 +425,12 @@ def print_summary(state: TaskState) -> str:
     """
     fmt = (state.get("output_format") or "text").lower()
     plain = render_summary_plain(state)
-    click.echo(plain if fmt == "plain" else render_summary_text(state))
+    if fmt == "json":
+        click.echo(render_summary_json(state))
+    elif fmt == "quiet":
+        click.echo(render_summary_quiet(state))
+    elif fmt == "plain":
+        click.echo(plain)
+    else:
+        click.echo(render_summary_text(state))
     return plain
