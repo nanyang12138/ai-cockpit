@@ -232,3 +232,49 @@ def emit_apply_warning_if_needed(
             "from config to invert.",
             file=sys.stderr,
         )
+
+
+_GITIGNORE_HEADER = "# v0.5 row #10: per-operator config override (gitignored)"
+_GITIGNORE_ENTRY = "**/.ai-cockpit/config.local.yaml"
+
+
+def ensure_gitignore_entry(project_root: str | Path) -> bool:
+    """Idempotently append the ``config.local.yaml`` gitignore entry.
+
+    Returns True iff the file was modified (entry was missing).
+    """
+    gi = Path(project_root) / ".gitignore"
+    existing = gi.read_text(encoding="utf-8") if gi.is_file() else ""
+    if _GITIGNORE_ENTRY in existing.splitlines():
+        return False
+    sep = "" if not existing or existing.endswith("\n") else "\n"
+    gi.write_text(
+        f"{existing}{sep}\n{_GITIGNORE_HEADER}\n{_GITIGNORE_ENTRY}\n",
+        encoding="utf-8",
+    )
+    return True
+
+
+def write_project_config(
+    project_root: str | Path, cfg: ProjectConfig
+) -> Path:
+    """Serialise ``cfg`` to ``<root>/.ai-cockpit/config.yaml`` (sub-gate b).
+
+    Caller is responsible for any backup-on-overwrite policy; this helper
+    just writes. Loader-relevant fields only — bookkeeping fields
+    (sources, project_path, local_path) are NOT serialised.
+    """
+    data: dict[str, Any] = {"schema_version": 1, "defaults": {}}
+    for key in _SCHEMA:
+        value = getattr(cfg, key)
+        if value is not None:
+            data["defaults"][key] = value
+    cfg_dir = Path(project_root) / CONFIG_DIR
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    path = cfg_dir / CONFIG_FILENAME
+    path.write_text(
+        yaml.safe_dump(data, sort_keys=False, default_flow_style=False),
+        encoding="utf-8",
+    )
+    ensure_gitignore_entry(project_root)
+    return path
