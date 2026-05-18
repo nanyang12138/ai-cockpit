@@ -1,12 +1,17 @@
 # v0.3 — Operating Status (in-repo snapshot / fallback)
 
-**Status as of 2026-05-17 ~08:51 UTC, master tip `338d668`:**
-`idle-healthy`. Section A is 8/8 complete. Section B's required set
-is delivered **plus B.2 implementation (PR #66)**; only B.4
-implementation remains gated. The v0.4 exit-gate operator runbook
-and evidence template shipped (PR #73); the gate run itself is still
-operator-driven and has not been executed. No `active_plan_id` is
-set; cron is NOT authorized to execute any `plans run` slice.
+**Status as of 2026-05-18 ~01:30 UTC, master tip `7295652`:**
+`idle-healthy`, **v0.4 GATE PASSED**. Section A is 8/8 complete.
+Section B's required set is delivered **plus B.2 implementation (PR
+#66)**; only B.4 implementation remains gated. The v0.4 exit-gate
+operator runbook + evidence template shipped (PR #73) **and the
+gate run itself closed on 2026-05-17 14:55:21 UTC** — see
+`docs/V0_4_EXIT_EVIDENCE.md` (PR #89). Five v0.5 row contracts are
+LOCKED on master (Rows 1/2/3/5/6, PRs #87/#90–#95), but no v0.5
+implementation gate has been opened by the user; cron is back to
+`idle-healthy` awaiting the first `open-gate v0.5-row-N-<slug>`
+signal. No `active_plan_id` is set; cron is NOT authorized to
+execute any `plans run` slice.
 
 ## 1. What this file is
 
@@ -38,16 +43,24 @@ authorization model.
 
 ```
 mode:              idle-healthy
-master_tip:        338d668
+master_tip:        7295652
 last_section_a:    A.8 (PR #42, 2026-05-16) — Section A 8/8 complete
 last_section_b:    B.2 implement (PR #66, 2026-05-17)
 last_v0_4_prep:    operator runbook + evidence template (PR #73, 2026-05-17)
 active_plan_id:    (none)
-v0.4_exit_gate:    NOT RUN — operator action required, see B_5_CONTRACT §4
-                   and scripts/v0_4_exit_gate.sh
-open_section_b:    B.5 contract (done), B.3 contract+impl (done),
-                   B.2 contract+impl (done; PRs #63 + #66),
-                   B.4 contract (done, impl not open-gated)
+v0.4_exit_gate:    PASSED — closing attempt 9, thread 111363ec4b5a,
+                   2026-05-17 14:55:21 UTC, cost $0.10, wall 35.76 s,
+                   0 in-gate human interventions. Evidence merged via
+                   PR #89; full transcript + Q1/Q4 mapping in
+                   docs/V0_4_EXIT_EVIDENCE.md.
+open_section_b:    B.5 contract+evidence (done, PRs #60/#73/#89),
+                   B.3 contract+impl (done), B.2 contract+impl (done;
+                   PRs #63 + #66), B.4 contract (done, impl not
+                   open-gated)
+v0.5_status:       roadmap merged (PR #86); 5 row contracts LOCKED on
+                   master (Row 1/2/3/5/6 — PRs #87/#90–#95); zero v0.5
+                   implementation gates opened; cron not authorized to
+                   start any v0.5 src/tests work.
 ```
 
 Per `docs/ROADMAP.md` "How cron should consume this file" §5:
@@ -100,7 +113,7 @@ cron-actionable summary:
 | B.2 planner quirks | done (PR #63) | done (PR #66, `src/ai_cockpit/workers/quirks.py` + `tests/test_worker_quirks.py`) | closed |
 | B.3 cost dashboard | done (PR #61) | done (PR #62) | closed |
 | B.4 --system-prompt FILE | done (PR #64) | not started | needs explicit open-gate |
-| B.5 v0.4 exit gate | done (PR #60) | operator runbook + evidence template shipped (PR #73, `scripts/v0_4_exit_gate.sh`, `docs/V0_4_EXIT_EVIDENCE.md`); exit run itself still pending | operator-only (B.5 §11.3) |
+| B.5 v0.4 exit gate | done (PR #60) | runbook + evidence template shipped (PR #73); **gate PASSED 2026-05-17 14:55 UTC, evidence merged via PR #89** (`docs/V0_4_EXIT_EVIDENCE.md`) | operator-only (B.5 §11.3); now closed |
 | B.6 multi-step planner | done | a/b/c shipped | closed (Q5 second key unset) |
 | B.9 interactive planner | done | a/b/c shipped; d superseded by B.10b | closed |
 | B.10 Cursor role backends | done | a/b/c/d/e shipped | closed |
@@ -154,6 +167,56 @@ being part of it (user-authorized independently):
 After the window closed, `mode` returned to `idle-healthy` and cron is
 waiting for the next user signal (typically "open-gate B.5 exit run"
 or "open-gate B.4 impl"; B.2 impl is now closed).
+
+## 6.1 v0.4 exit-gate window (2026-05-17) — **CLOSED**
+
+The v0.4 exit gate was opened by the user on 2026-05-17 and closed
+the same day. The operator (`nanyang2@atletx8-neu006`, AMD APIM
+Claude Opus 4.6) ran the gate over 9 attempts; the closing attempt
+finished `Decision: done, passed: True, risk: low, issues: (none)`
+at 14:55:21 UTC at a cost of **\$0.10** and wall-time **35.76 s**,
+satisfying every B.5 §3 Q1 / Q4 condition. The 8 integration-seam
+bugs surfaced by attempts 1–8 (Bug A–G + the A.7 ↔ B.6 wiring fix)
+were each closed by a separate ≤8-file PR before the next attempt:
+
+| PR | Title | Surfacing attempt |
+|----|-------|-------------------|
+| #77 | `fix(plans-run): add --allow-dirty-tree flag (B.6 ↔ A.7 integration bug)` | 2 |
+| #78 | `fix(aider-worker): accept aider 0.86 single-line 'Tokens: ... Cost: ...' stdout` | 3 |
+| #79 | `fix(demo-fixture): drop anti-fix guard that contradicts the v0.4 exit-gate` | 3 |
+| #80 | `fix(b2-quirks): add verifier.test_command_path quirk` | 3 |
+| #81 | `fix(b2-quirks): tighten test_command_path summary so 80-char clip keeps the example` | 5 |
+| #82 | `fix(b9-interactive-planner): plumb --worker through to B.2 quirk injection (Bug E)` | 6 |
+| #83 | `fix(verifier-cwd): three-layer defense against test_command path-doubling (Bug F)` | 7 |
+| #84 | `fix(plans-run): write memory suggestion after a successful run (Bug G)` | 8 |
+| #89 | `v0.4 exit-gate: PASSED — evidence + real-LLM-driven calc.py fix + plan + accepted memory` | 9 (closing) |
+
+PR #85 was a same-content duplicate of #84 produced by a parallel
+cloud-agent run; the closure note in PR #85's body records the
+non-overlap. See `docs/V0_4_EXIT_EVIDENCE.md` §8 for the full
+attempt timeline and §11 for the ergonomics findings captured as
+v0.5 backlog seeds.
+
+After the gate closed, the user authorized only **doc-only** v0.5
+roadmap + row-contract work; the v0.5 implementation gates are
+**not** yet open. PRs merged inside this follow-up window:
+
+| PR | Subject | Status |
+|----|---------|--------|
+| #86 | `docs(v0_5): roadmap draft for 9 agent-paradigm deficiencies (review pending)` | merged (`20f631d`) |
+| #87 | `docs(v0_5-row-6): plan-cwd-context contract (locked)` | merged (`65dc852`) |
+| #90 | `docs(v0_5-row-5): planner-self-check contract (locked)` | merged (`210f162`) |
+| #91 | `docs(v0_5-row-1): planner-replan contract (locked)` | merged (`38141f7`) |
+| #92 | `docs(v0_5-row-2): reviewer-findings contract (locked)` | merged (`9c3701c`) |
+| #93 | `docs(v0_5-row-3): prompt-coverage contract (locked)` | merged (`865d7e8`) |
+| #94 | `docs(v0_5-row-5): planner-self-check contract (locked)` (master-merge follow-up) | merged (`cb8be75`) |
+| #95 | `docs(v0_5-row-2): reviewer-findings contract (locked)` (master-merge follow-up) | merged (`7295652`) |
+
+`mode` is now back to `idle-healthy`. Cron is **not** authorized to
+open any v0.5 implementation gate without an explicit user
+`open-gate v0.5-row-N-<slug>` signal naming the row number and
+confirming the answers to that row's §4 open questions
+(`docs/V0_5_ROADMAP.md` §6).
 
 ## 7. Permanent boundaries (carried verbatim from spec §12)
 
