@@ -26,13 +26,19 @@ deficiencies** spanning the feedback-loop topology, the
 reviewer→planner channel, the CI-vs-real-LLM gap, the worker
 dispatcher, and the memory model. A **10th deficiency** was added
 on 2026-05-18 ~02:39 UTC — a *CLI ergonomics / onboarding* gap
-surfaced during the first real-user-style usage conversation
-(user role, not cron-operator role) — see Row #10 §0 for the
-verbatim critique. This document organises all 10 into v0.5 /
-v0.6 / not-doing buckets, flags strategic open questions that
-require user decisions, and specifies the dependency order. Each
-row maps 1:1 to a future `docs/V0_5_<gate>_CONTRACT.md` file once
-the user opens its gate.
+surfaced during the first real-user-style usage conversation. An
+**11th deficiency** was added on 2026-05-18 ~07:08 UTC — a
+*philosophical* gap (the only modes are workflow modes; there is
+no "low-commitment chat / exploration" entry point) surfaced
+after row #10 sub-gate b shipped and the operator hit the
+"I just want to look, not run" wall. Row #11's design reuses
+cursor's interactive mode behind an ai-cockpit wrapper rather
+than building a new chat surface; see Row #11 §0 for the
+operator's verbatim framing. This document organises all 11
+into v0.5 / v0.6 / not-doing buckets, flags strategic open
+questions that require user decisions, and specifies the
+dependency order. Each row maps 1:1 to a future
+`docs/V0_5_<gate>_CONTRACT.md` file once the user opens its gate.
 
 ## 2. Hard invariants (cannot be overridden by any v0.5 gate)
 
@@ -60,7 +66,8 @@ is required.
 | 3 | `prompt-coverage`     | golden-prompt CI + nightly real-LLM probe (both on per user 15:08) — **CONTRACT LOCKED** at `docs/V0_5_ROW_3_PROMPT_COVERAGE_CONTRACT.md` | ≤6        | ≤300    | none       |
 | 5 | `planner-self-check`  | deterministic static lint on planner output before coder runs — **CONTRACT LOCKED** at `docs/V0_5_ROW_5_PLANNER_SELF_CHECK_CONTRACT.md` | ≤4        | ≤200    | none       |
 | 6 | `plan-cwd-context`    | `Plan.assumed_cwd` field + mismatch warning at `plans run` — **CONTRACT LOCKED** at `docs/V0_5_ROW_6_PLAN_CWD_CONTEXT_CONTRACT.md` | ≤4        | ≤120    | none       |
-| 10 | `cli-ergonomics-project-config` | `.ai-cockpit/config.yaml` carrying per-project flag defaults (+ optional `ai-cockpit init` wizard in sub-gate b) so daily invocations become 1-flag instead of 6-flag — **CONTRACT LOCKED** at `docs/V0_5_ROW_10_CLI_ERGONOMICS_CONTRACT.md`; impl-a gate granted 2026-05-18 05:24 UTC | ≤7 combined (split a+b) | ≤400 combined | none (orthogonal to graph rows) |
+| 10 | `cli-ergonomics-project-config` | `.ai-cockpit/config.yaml` carrying per-project flag defaults (+ optional `ai-cockpit init` wizard in sub-gate b) so daily invocations become 1-flag instead of 6-flag — **CONTRACT LOCKED** at `docs/V0_5_ROW_10_CLI_ERGONOMICS_CONTRACT.md`; impl-a + impl-b + dirty-tree follow-up all SHIPPED (PRs #101 / #103 / #105 / #106) | ≤7 combined (split a+b) | ≤400 combined | none (orthogonal to graph rows) |
+| 11 | `chat-mode` | `ai-cockpit chat [QUESTION]` invokes cursor's interactive (or one-shot) mode with project config + memory pre-loaded as system prompt. Read-only by default (cursor `--read-only` or git-stash snapshot fallback). Two modes coexist: workflow (existing `run`/`plan`) and chat (this row). — **CONTRACT DRAFT, Q-lock pending** at `docs/V0_5_ROW_11_CHAT_MODE_CONTRACT.md` | ≤8 combined (split a+b) | ≤450 combined | none (orthogonal to graph rows; uses existing cursor adapter) |
 
 ### Bucket B: v0.6 candidates (defer, need v0.5 evidence first)
 
@@ -283,6 +290,44 @@ full Q-table with cron recommendations awaiting user lock.
 
 ---
 
+### Row #11 — `chat-mode` (Bucket A, surfaced 2026-05-18)
+
+**What.** Add `ai-cockpit chat [QUESTION]` that invokes cursor's
+interactive mode (or a one-shot Q&A) with `.ai-cockpit/config.yaml`
++ `.ai-cockpit/memory/*.md` pre-loaded as the cursor session's
+system prompt. Two modes coexist clearly:
+
+- **Workflow mode** (`run` / `plan` / `plans run`, existing): you
+  have a concrete task → produce code change + evidence trail.
+- **Chat mode** (this row, new): you want to explore / ask /
+  decide → cursor REPL with project context pre-loaded, no
+  workflow, no memory writes, no reviewer.
+
+Read-only by default (cursor `--read-only` flag if supported, or
+`git stash` snapshot fallback). Two backends in v0.1: `cursor`
+(sub-gate a, headline path) + `builtin` (sub-gate b, falls back
+to ai-cockpit's LLMProvider when cursor binary is missing).
+
+**Why.** v0.1–v0.4 (and even row #10) all share the assumption
+that the operator always wants to produce an artefact. The
+2026-05-18 06:46 UTC operator chat surfaced the counter-case
+verbatim: *"我就是想看一下这个目录下面的状态 或者问一下问题
+不可以吗？ ... 但是我现在还不想跑我想先看一下状态"*. The
+operator's instinct *"我可以直接用ai-cockpit 把cursor 的交互
+模式调用进来不就好了 我可以用cursor 也可以用自己的模式"* is
+exactly right — reuse cursor's already-excellent interactive
+UX, don't reinvent it inside ai-cockpit.
+
+**Open questions:** 8 in total — read-only enforcement, backend
+support, one-shot vs interactive, memory injection mechanism,
+process model, cost tracking, chat-log retention, chat→workflow
+handoff. See `docs/V0_5_ROW_11_CHAT_MODE_CONTRACT.md` §3 for the
+full Q-table with cron recommendations awaiting user lock.
+
+**Scope:** see Bucket A table.
+
+---
+
 ### Row #4 — `worker-router` (Bucket B, defer to v0.6)
 
 **What.** Deterministic `WorkerRouter` class: `select(slice: Slice,
@@ -383,17 +428,18 @@ prevention with smallest blast radius first, and front-loads the
 row that unblocks operator real-usage signal that the other rows
 need for prioritisation calibration):
 
-0. **#10 cli-ergonomics-project-config** (front-loaded; orthogonal
-   to the graph; unblocks operator real-daily-use signal that
-   rows #1/#2/#3/#5 depend on for prioritisation). Sub-gate a
-   (config loader + CLI fallback) then sub-gate b (`init`
-   wizard).
-1. #6 plan-cwd-context (smallest graph-side change, immediately
+0. **#10 cli-ergonomics-project-config** (DONE 2026-05-18 — PRs
+   #101 / #103 / #105 / #106).
+1. **#11 chat-mode** (next; orthogonal to the graph; closes the
+   "low-commitment exploration" gap that row #10 surfaced. Same
+   front-loading rationale: unblocks operator real-use signal
+   that rows #1/#2/#3/#5 depend on).
+2. #6 plan-cwd-context (smallest graph-side change, immediately
    useful, isolated)
-2. #5 planner-self-check (cheap belt-and-suspenders for Bug F)
-3. #1 planner-replan (biggest leverage)
-4. #2 reviewer-findings (depends on #1 to be useful)
-5. #3 prompt-coverage (process change, independent)
+3. #5 planner-self-check (cheap belt-and-suspenders for Bug F)
+4. #1 planner-replan (biggest leverage)
+5. #2 reviewer-findings (depends on #1 to be useful)
+6. #3 prompt-coverage (process change, independent)
 
 **Phase 3 — v0.5 exit gate.** Sketch (full contract is its own
 gate, analogous to B.5): a real-LLM end-to-end run on
@@ -408,18 +454,26 @@ contracts drafted only after v0.5 exit gate signed off.
 ## 6. Open-gate protocol
 
 ```text
-open-gate v0.5-row-10-cli-ergonomics-lock         # required FIRST
-                                                  # for row #10:
-                                                  # answer the 10
-                                                  # Q's in
-                                                  # ROW_10_CONTRACT §3
+open-gate v0.5-row-10-cli-ergonomics-lock         # DONE — merged in
+                                                  # PR #100
+open-gate v0.5-row-10-impl-a                      # DONE — merged in
+                                                  # PRs #101 + #103
+open-gate v0.5-row-10-impl-b                      # DONE — merged in
+                                                  # PR #105 (+ #106
+                                                  # dirty-tree fix)
+
+open-gate v0.5-row-11-lock                        # required FIRST
+                                                  # for row #11:
+                                                  # answer the 8 Q's
+                                                  # in
+                                                  # ROW_11_CONTRACT §3
                                                   # (or "accept all
                                                   # cron
                                                   # recommendations")
-open-gate v0.5-row-10-impl-a                      # NOT until
-                                                  # row-10-lock
+open-gate v0.5-row-11-impl-a                      # NOT until
+                                                  # row-11-lock
                                                   # merged
-open-gate v0.5-row-10-impl-b                      # NOT until impl-a
+open-gate v0.5-row-11-impl-b                      # NOT until impl-a
                                                   # merged
 
 open-gate v0.5-row-6-plan-cwd-context             # smallest graph
