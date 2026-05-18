@@ -26,6 +26,7 @@ def _fake_chat_result(
     system_prompt_bytes: int = 0,
     truncated_files: tuple[str, ...] = (),
     dirty_paths_on_exit: tuple[str, ...] = (),
+    memory_context_file: str | None = None,
 ) -> chat_module.ChatSpawnResult:
     return chat_module.ChatSpawnResult(
         exit_code=exit_code,
@@ -33,6 +34,7 @@ def _fake_chat_result(
         system_prompt_bytes=system_prompt_bytes,
         truncated_files=truncated_files,
         dirty_paths_on_exit=dirty_paths_on_exit,
+        memory_context_file=memory_context_file,
     )
 
 
@@ -105,18 +107,38 @@ def test_chat_reports_dirty_paths_on_exit(
     assert "README.md" in result.stderr
 
 
-def test_chat_emits_memory_injection_info_line(
+def test_chat_emits_one_shot_prepended_info_line(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    """When memory injection produced bytes, the CLI prints an info line
-    so the operator knows context was loaded."""
+    """One-shot mode (memory_context_file is None): CLI prints
+    ``prepended N bytes ... to your question for cursor.``"""
     monkeypatch.setattr(
         cli_module, "spawn_cursor_chat",
-        lambda *a, **k: _fake_chat_result(system_prompt_bytes=2048),
+        lambda *a, **k: _fake_chat_result(
+            system_prompt_bytes=2048, memory_context_file=None
+        ),
+    )
+    result = CliRunner().invoke(main, ["chat", "--root", str(tmp_path), "q?"])
+    assert result.exit_code == 0
+    assert "prepended 2048 bytes" in result.stderr
+
+
+def test_chat_emits_interactive_context_file_path(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    """Interactive mode (memory_context_file set): CLI tells the
+    operator the path so they can manually paste into cursor."""
+    fake_path = "/proj/.ai-cockpit/history/chat-context-abc123.md"
+    monkeypatch.setattr(
+        cli_module, "spawn_cursor_chat",
+        lambda *a, **k: _fake_chat_result(
+            system_prompt_bytes=2048, memory_context_file=fake_path
+        ),
     )
     result = CliRunner().invoke(main, ["chat", "--root", str(tmp_path)])
     assert result.exit_code == 0
-    assert "injected 2048 bytes" in result.stderr
+    assert fake_path in result.stderr
+    assert "Paste its contents" in result.stderr
 
 
 def test_chat_warns_on_truncation(

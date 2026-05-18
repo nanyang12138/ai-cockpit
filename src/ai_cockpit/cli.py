@@ -990,10 +990,24 @@ def chat_cmd(
             "ships."
         )
 
-    if result.system_prompt_bytes:
+    if result.memory_context_file is not None:
+        # Interactive mode: memory was written to a temp file; tell
+        # the operator how to use it. Goes BEFORE cursor's REPL takes
+        # over the terminal (cli emits to stderr while cursor still
+        # owns stdin).
         click.echo(
-            f"info: injected {result.system_prompt_bytes} bytes of "
-            f".ai-cockpit/memory/*.md into Cursor's system prompt.",
+            f"info: project memory ({result.system_prompt_bytes} bytes) "
+            f"written to {result.memory_context_file}. Paste its "
+            "contents into your first cursor message if you want "
+            "cursor to use it as context. See "
+            "`cat {0}` to view.".format(result.memory_context_file),
+            err=True,
+        )
+    elif result.system_prompt_bytes:
+        # One-shot mode: memory was prepended to the question argv.
+        click.echo(
+            f"info: prepended {result.system_prompt_bytes} bytes of "
+            ".ai-cockpit/memory/*.md to your question for cursor.",
             err=True,
         )
     if result.truncated_files:
@@ -1005,8 +1019,9 @@ def chat_cmd(
     if result.dirty_paths_on_exit:
         click.echo(
             "warning: working tree gained the following uncommitted "
-            "paths during this chat session (Cursor's --read-only flag "
-            "may not have been honoured by your build):",
+            "paths during this chat session (cursor's read-only "
+            "behaviour is best-effort; ai-cockpit's git-stash "
+            "detection caught these):",
             err=True,
         )
         for p in result.dirty_paths_on_exit:
