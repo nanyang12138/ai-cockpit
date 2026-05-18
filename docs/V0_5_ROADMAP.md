@@ -1,4 +1,4 @@
-# V0.5 ROADMAP — agent-paradigm deficiencies (draft for user review)
+# V0.5 ROADMAP — agent-paradigm + ergonomics deficiencies (draft for user review)
 
 Status: **draft for user review.** No source under `src/` or `tests/`
 is touched by this PR; it ships only this document. Cron is NOT
@@ -21,13 +21,18 @@ most visible symptom; the structural root is "the planner emits a
 plan, and from then on nothing can correct it without operator
 intervention".
 
-The 2026-05-17 architecture review identified **9 deficiencies**
-spanning the feedback-loop topology, the reviewer→planner channel,
-the CI-vs-real-LLM gap, the worker dispatcher, and the memory model.
-This document organises all 9 into v0.5 / v0.6 / not-doing buckets,
-flags strategic open questions that require user decisions, and
-specifies the dependency order. Each row maps 1:1 to a future
-`docs/V0_5_<gate>_CONTRACT.md` file once the user opens its gate.
+The 2026-05-17 architecture review identified **9 agent-paradigm
+deficiencies** spanning the feedback-loop topology, the
+reviewer→planner channel, the CI-vs-real-LLM gap, the worker
+dispatcher, and the memory model. A **10th deficiency** was added
+on 2026-05-18 ~02:39 UTC — a *CLI ergonomics / onboarding* gap
+surfaced during the first real-user-style usage conversation
+(user role, not cron-operator role) — see Row #10 §0 for the
+verbatim critique. This document organises all 10 into v0.5 /
+v0.6 / not-doing buckets, flags strategic open questions that
+require user decisions, and specifies the dependency order. Each
+row maps 1:1 to a future `docs/V0_5_<gate>_CONTRACT.md` file once
+the user opens its gate.
 
 ## 2. Hard invariants (cannot be overridden by any v0.5 gate)
 
@@ -55,6 +60,7 @@ is required.
 | 3 | `prompt-coverage`     | golden-prompt CI + nightly real-LLM probe (both on per user 15:08) — **CONTRACT LOCKED** at `docs/V0_5_ROW_3_PROMPT_COVERAGE_CONTRACT.md` | ≤6        | ≤300    | none       |
 | 5 | `planner-self-check`  | deterministic static lint on planner output before coder runs — **CONTRACT LOCKED** at `docs/V0_5_ROW_5_PLANNER_SELF_CHECK_CONTRACT.md` | ≤4        | ≤200    | none       |
 | 6 | `plan-cwd-context`    | `Plan.assumed_cwd` field + mismatch warning at `plans run` — **CONTRACT LOCKED** at `docs/V0_5_ROW_6_PLAN_CWD_CONTEXT_CONTRACT.md` | ≤4        | ≤120    | none       |
+| 10 | `cli-ergonomics-project-config` | `.ai-cockpit/config.yaml` carrying per-project flag defaults (+ optional `ai-cockpit init` wizard in sub-gate b) so daily invocations become 1-flag instead of 6-flag — **CONTRACT DRAFT, Q-lock pending** at `docs/V0_5_ROW_10_CLI_ERGONOMICS_CONTRACT.md` | ≤7 combined (split a+b) | ≤400 combined | none (orthogonal to graph rows) |
 
 ### Bucket B: v0.6 candidates (defer, need v0.5 evidence first)
 
@@ -241,6 +247,42 @@ been recorded. Very small, very contained, useful immediately.
 
 ---
 
+### Row #10 — `cli-ergonomics-project-config` (Bucket A, surfaced 2026-05-18)
+
+**What.** Introduce `.ai-cockpit/config.yaml` (and optional
+`.ai-cockpit/config.local.yaml` for personal overrides) carrying
+per-project flag defaults — `llm`, `worker`, `apply`, `workflow`,
+`max_loops`, `mode`, `reviewer`, `backend`, `suggest`,
+`allow_dirty_tree`. CLI flag resolution gains a precedence chain
+(CLI flag > workflow YAML > local config > project config >
+built-in default) using Click's `ParameterSource.COMMANDLINE`
+discrimination. Sub-gate b ships an `ai-cockpit init` interactive
+wizard that generates the config in ≤6 prompts. Daily invocations
+drop from `ai-cockpit run "..." --workflow X --llm auto --worker
+aider --apply --thread-id ... --max-loops N` to
+`ai-cockpit run "..."`.
+
+**Why.** Surfaced on 2026-05-18 ~02:39 UTC during the first
+real-user-style conversation about the tool (verbatim critique in
+`docs/V0_5_ROW_10_CLI_ERGONOMICS_CONTRACT.md` §0). The 14 flags
+on `run` and 8 on `plan` were designed flag-by-flag as safety
+escape hatches; in composition they form a CLI cliff that
+prevents new users from getting started and forces each cron /
+shell-alias wrapper to encode the same 6-flag combination
+redundantly. Unblocks operator real-usage data collection that
+rows #1–#3 + #5 depend on for prioritisation calibration.
+
+**Open questions:** 10 in total — file path, format, precedence,
+absent-file behaviour, credential rejection, `apply: true`
+allowed in config?, git-tracked?, simple-name workflow
+resolution, ship `init` in same PR?, per-subcommand sections?
+See `docs/V0_5_ROW_10_CLI_ERGONOMICS_CONTRACT.md` §3 for the
+full Q-table with cron recommendations awaiting user lock.
+
+**Scope:** see Bucket A table.
+
+---
+
 ### Row #4 — `worker-router` (Bucket B, defer to v0.6)
 
 **What.** Deterministic `WorkerRouter` class: `select(slice: Slice,
@@ -335,11 +377,19 @@ merged. Until then no v0.5 row moves past CONTRACT.
 in any order, but #2 depends on #1. Cron drafts each only after
 the user opens that row's gate AND answers its §4 open questions.
 
-**Phase 2 — implementations** (one PR per row). Suggested order
-(maximises early Bug F-class prevention with smallest blast
-radius first):
+**Phase 2 — implementations** (one PR per row, or per sub-gate
+for row #10). Suggested order (maximises early Bug F-class
+prevention with smallest blast radius first, and front-loads the
+row that unblocks operator real-usage signal that the other rows
+need for prioritisation calibration):
 
-1. #6 plan-cwd-context (smallest, immediately useful, isolated)
+0. **#10 cli-ergonomics-project-config** (front-loaded; orthogonal
+   to the graph; unblocks operator real-daily-use signal that
+   rows #1/#2/#3/#5 depend on for prioritisation). Sub-gate a
+   (config loader + CLI fallback) then sub-gate b (`init`
+   wizard).
+1. #6 plan-cwd-context (smallest graph-side change, immediately
+   useful, isolated)
 2. #5 planner-self-check (cheap belt-and-suspenders for Bug F)
 3. #1 planner-replan (biggest leverage)
 4. #2 reviewer-findings (depends on #1 to be useful)
@@ -358,8 +408,23 @@ contracts drafted only after v0.5 exit gate signed off.
 ## 6. Open-gate protocol
 
 ```text
-open-gate v0.5-row-6-plan-cwd-context             # smallest; no
-                                                  # open Q dependency
+open-gate v0.5-row-10-cli-ergonomics-lock         # required FIRST
+                                                  # for row #10:
+                                                  # answer the 10
+                                                  # Q's in
+                                                  # ROW_10_CONTRACT §3
+                                                  # (or "accept all
+                                                  # cron
+                                                  # recommendations")
+open-gate v0.5-row-10-impl-a                      # NOT until
+                                                  # row-10-lock
+                                                  # merged
+open-gate v0.5-row-10-impl-b                      # NOT until impl-a
+                                                  # merged
+
+open-gate v0.5-row-6-plan-cwd-context             # smallest graph
+                                                  # row; no open Q
+                                                  # dependency
 open-gate v0.5-row-5-planner-self-check           # answer §4 Q1–Q3
 open-gate v0.5-row-3-prompt-coverage              # answer §4 Q1–Q4
 open-gate v0.5-row-1-planner-replan               # answer §4 Q1–Q5
