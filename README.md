@@ -290,6 +290,20 @@ ai-cockpit "smoke" --no-checkpoint
 `--no-checkpoint` cannot be combined with `--thread-id`, `--resume`,
 or `--checkpoint-db`.
 
+### Summary rendering (v0.5)
+
+`ai-cockpit run` finishes by printing a structured summary block. The
+default view is **colored, sectioned text** (Idea / Plan / Execution /
+Review) with the decision rendered as a bracket token (`[DONE]` /
+`[ASK_HUMAN]` / `[RETRY]`) for easy grep. Color auto-detects from
+stdout — pipes, redirects, and `NO_COLOR=1` get ANSI-free output, and
+the greppable title `AI Cockpit — Run Summary` is always present. The
+plain v0.1 layout remains available programmatically via
+`ai_cockpit.render.render_summary_plain` for tests and tools that
+depend on the historical column-aligned shape; `final_summary` in the
+checkpoint DB also continues to store that plain text byte-for-byte so
+historical replay keeps working.
+
 Example:
 
 ```bash

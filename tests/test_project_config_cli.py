@@ -144,7 +144,9 @@ def test_workflow_simple_name_in_config_resolves(tmp_path: Path) -> None:
     )
     assert result.exit_code == 0, result.output
     # Mode in the run summary should reflect the loaded workflow (task).
-    assert "Mode:        task" in result.output
+    # v0.5 summary renderer uses inline ``Mode: task`` layout; older plain
+    # mode keeps the column-aligned form. Match both.
+    assert ("Mode: task" in result.output) or ("Mode:        task" in result.output)
 
 
 def test_plan_back_fills_llm_from_config(tmp_path: Path) -> None:

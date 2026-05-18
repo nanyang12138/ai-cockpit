@@ -72,6 +72,16 @@ class TaskState(TypedDict, total=False):
     # B.3: worker token/cost metrics; absent on pre-B.3 checkpoints (total=False).
     metrics: dict[str, float]
 
+    # v0.5 summary-rendering: how summary_node prints its result.
+    # Currently consumed by :func:`ai_cockpit.render.print_summary` to
+    # pick between the new colored text view (default ``"text"``) and
+    # the v0.1-compatible ``"plain"`` view. Absent on pre-v0.5
+    # checkpoints (``total=False``); treated as ``"text"`` then. Does
+    # NOT affect the plain text stored in ``final_summary`` — that
+    # remains the v0.1-compatible shape so checkpoint replay + grep
+    # workflows keep working.
+    output_format: str
+
 
 def initial_state(
     *,
@@ -81,6 +91,7 @@ def initial_state(
     max_loops: int = 1,
     test_commands: list[str] | None = None,
     dry_run: bool = False,
+    output_format: str | None = None,
 ) -> TaskState:
     """Construct the starting `TaskState` for a run."""
 
@@ -93,6 +104,8 @@ def initial_state(
         "test_commands": list(test_commands or []),
         "dry_run": dry_run,
     }
+    if output_format:
+        state["output_format"] = output_format
     return state
 
 
