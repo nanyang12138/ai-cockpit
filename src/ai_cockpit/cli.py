@@ -482,6 +482,25 @@ def _apply_project_config_defaults(
         "through Cursor; prompt is still §9 evidence only."
     ),
 )
+@click.option(
+    "--format",
+    "output_format",
+    default="text",
+    show_default=True,
+    type=click.Choice(["text", "plain", "json", "quiet"], case_sensitive=False),
+    help=(
+        "Summary output format. 'text' (default) auto-colors on a TTY; "
+        "'plain' is the v0.1 column-aligned shape; 'json' dumps key "
+        "fields machine-readably; 'quiet' prints one line. Honors "
+        "NO_COLOR. -q is a shortcut for --format quiet."
+    ),
+)
+@click.option(
+    "-q", "--quiet", "quiet",
+    is_flag=True,
+    default=False,
+    help="Shortcut for --format quiet (one-line summary).",
+)
 @click.pass_context
 def run_cmd(
     ctx: click.Context,
@@ -502,6 +521,8 @@ def run_cmd(
     apply: bool,
     allow_dirty_tree: bool,
     reviewer_backend: str,
+    output_format: str,
+    quiet: bool,
 ) -> None:
     if no_checkpoint and (thread_id or resume or checkpoint_db):
         raise click.UsageError(
@@ -642,6 +663,8 @@ def run_cmd(
     if reviewer_backend.lower() == "cursor":
         click.echo("info: reviewer=cursor (Cursor receives §9 evidence only)", err=True)
 
+    effective_output_format = "quiet" if quiet else output_format.lower()
+
     final_state = run_graph(
         user_input=user_input,
         project_root=project_root,
@@ -655,6 +678,7 @@ def run_cmd(
         resume=resume,
         worker_name=worker_name,
         reviewer_llm=reviewer_llm,
+        output_format=effective_output_format,
     )
 
     if suggest and final_state is not None:

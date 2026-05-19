@@ -99,6 +99,8 @@ Optional flags:
 | `--resume` | off | Boolean flag. Resume the run identified by `--thread-id` from its last checkpoint. Requires `--thread-id`; the idea argument is ignored. |
 | `--no-checkpoint` | off | Disable SQLite checkpointing for this run (no DB writes). Mutually exclusive with `--thread-id` / `--resume` / `--checkpoint-db`. |
 | `--checkpoint-db PATH` | `<root>/.ai-cockpit/history/checkpoints.sqlite` | Override the checkpoint DB location. |
+| `--format FORMAT` | `text` | Summary output style. `text` (default) auto-colors on a TTY; `plain` is the v0.1 column-aligned shape; `json` dumps key fields machine-readably; `quiet` prints one line. Honors `NO_COLOR`. |
+| `-q`, `--quiet` | off | Shortcut for `--format quiet`. Prints `[DECISION] verification=… review=… risk=…` on a single line — convenient for shell loops and CI status checks. |
 
 ### LLM configuration (v0.2 step 1, opt-in)
 
@@ -292,17 +294,35 @@ or `--checkpoint-db`.
 
 ### Summary rendering (v0.5)
 
-`ai-cockpit run` finishes by printing a structured summary block. The
-default view is **colored, sectioned text** (Idea / Plan / Execution /
-Review) with the decision rendered as a bracket token (`[DONE]` /
-`[ASK_HUMAN]` / `[RETRY]`) for easy grep. Color auto-detects from
-stdout — pipes, redirects, and `NO_COLOR=1` get ANSI-free output, and
-the greppable title `AI Cockpit — Run Summary` is always present. The
-plain v0.1 layout remains available programmatically via
-`ai_cockpit.render.render_summary_plain` for tests and tools that
-depend on the historical column-aligned shape; `final_summary` in the
-checkpoint DB also continues to store that plain text byte-for-byte so
-historical replay keeps working.
+`ai-cockpit run` finishes by printing a structured summary block. Four
+formats are available:
+
+- `--format text` (default): colored, sectioned layout (Idea / Plan /
+  Execution / Review / Next Steps) with the decision rendered as a
+  bracket token (`[DONE]` / `[ASK_HUMAN]` / `[RETRY]` / `[STOP]`) for
+  easy grep. Color auto-detects from stdout — pipes, redirects, and
+  `NO_COLOR=1` get ANSI-free output. The greppable title
+  `AI Cockpit — Run Summary` is always present.
+- `--format plain`: the v0.1 column-aligned shape, byte-identical to
+  pre-v0.5 output. Use for CI logs / tests that depend on the
+  historical layout.
+- `--format json`: machine-readable dump of decision, mode, loop
+  counters, idea, mvp_spec, acceptance_criteria, implementation_slice,
+  coder_result, verification (passed + commands + git_status), review
+  (passed + risk + issues + notes + suggested_fix), and metrics. Pipe
+  to `jq` or feed another tool.
+- `--format quiet` / `-q`: one line —
+  `[DECISION] verification=pass|fail review=pass|fail risk=low|medium|high`.
+  Convenient for shell loops and CI exit-code checks.
+
+The text mode auto-appends a **Next Steps** section with actionable
+shell-command hints (e.g. `ai-cockpit memory list`, `git status
+--short`, re-run idioms) when the decision is `ask_human`, `retry`, or
+`done`.
+
+`final_summary` in the checkpoint DB always stores the v0.1-compatible
+plain text regardless of `--format` chosen, so historical replay /
+grep workflows keep working.
 
 Example:
 
